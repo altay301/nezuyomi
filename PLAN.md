@@ -263,6 +263,164 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 - **Phase 3 skipped.** The Suwayomi bridge needs a JVM process (typically 300–600 MB RAM, seconds of start-up, constant GC work), which conflicts with the low-heat goal. Revisit only if a needed source exists nowhere else. Categories, backup and tracking are also postponed.
 - **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). `extensions/anime.example` is ported from anime-cli (search page → episode list API → server list API → EmbedHost embed → config blob `base64(json XOR "otaku-embed-v1")` → HLS master playlist). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
 
+## Plan: Nyaa torrent downloads (Phase 2 addition, not implemented)
+
+Status: **planning only, waiting for the owner's answers to "Open decisions" below.** Nothing in this section is coded yet.
+
+### Goal
+
+Keep selected library series up to date with volumes released by a small, fixed set of Nyaa uploaders, without ever browsing the site: poll RSS, match releases to series the user linked once, hand the torrents to the user's own qBittorrent, and read the finished CBZ/ZIP/CBR/7z archives in the existing reader as "downloaded" local content.
+
+Non-goals: searching or browsing Nyaa in the UI, running our own torrent engine, touching any torrent that this app did not add, EPUB/light-novel/audiobook handling.
+
+### What the research showed (2026-11-25, real data)
+
+- **RSS:** `https://nyaa.si/?page=rss&u=<uploader>&c=3_0` filters by uploader and category on the server. Items carry `title`, `link` (the `.torrent`), `guid` (view page), `pubDate`, `nyaa:infoHash`, `nyaa:size`, `nyaa:seeders`, `nyaa:categoryId` — **no uploader field**, so the uploader is known only from which feed an item came from. A feed returns the newest 75 items. `q=<phrase>` can be combined with `u=` (verified: `u=UploaderE&q=shangri`). The feed is cached server-side for 5 minutes (`cache-control: max-age=300`) and answers `If-Modified-Since` with `304`.
+- **Categories:** `3_0` = all of Literature, `3_1` English-translated, `3_2` Non-English-translated, `3_3` Raw. The six uploaders post almost only `3_1`.
+- **Our HTTP client works** for both the RSS feeds and `.torrent` downloads (no Cloudflare/TLS-fingerprint problem, unlike SiteB).
+- **Not everything in Literature is manga.** UploaderC's feed is mostly `[Audiobook]` and `.epub` (light novels); UploaderF posts `.epub` too. Only archives are wanted.
+- **Torrent layouts seen:** a single `.cbz` as the torrent root (UploaderA, UploaderF), or a folder with one `.cbz` per volume (UploaderB, UploaderD, UploaderE). One torrent can hold many volumes (`v01-27`, 15 GiB), and a later torrent often supersedes an earlier one (`v01-13` then `v01-14`), so "new volume" detection must work per file, not per torrent.
+- **Title/file name shapes** (all real, used as test fixtures later):
+
+| Example | Shape |
+|---|---|
+| `Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)` | title, volume range, year range, `(Digital)`, `(Group)` |
+| `Ultimate Exorcist Kiyoshi v01,009-090 (2024-2026) (Digital) (UploaderA)` | volumes plus loose chapters after a comma |
+| `Queen's Quality (2017-2026) (Digital) (UploaderA)` | no volume number at all (whole run or one-shot) |
+| `The God-Slaying Demon King 001-021 as v01-05 (Digital-Compilation) (Square Enix) (UploaderE)` | chapters compiled into volumes, publisher in parentheses |
+| `Weekly Viz, ShonenJump and MangaPlus Chapter Updates - Week 47 2026 (Digital) (UploaderB)` | a pack of many series, not one series |
+| `Unnamed Memory v01-08 (2022-2026) (Digital) (GroupG, GroupH)` | several release groups (UploaderD posts as "GroupH") |
+| `Reincarnated Onmyoji v01-02 [Hanashi Media] [UpC]` | bracket style (UploaderC, UploaderF) |
+| `Mitama Security - Spirit Busters (2021) (Digital) (UploaderF-repack)` / `(UploaderF-Empire)` | two variants of the same release |
+| inside the torrent: `Teppeki Honeymoon v02 (2026) (Digital) (UploaderE).cbz` | one file per volume |
+
+### Architecture
+
+A native Rust module `src/nyaa/` (not a JS extension: it needs the qBittorrent client, the power policy and the database). Everything blocking runs on background threads at low priority, like the rest of the app.
+
+```
+nyaa/
+  feed.rs       RSS polling (conditional GET), item parsing
+  rules.rs      per-uploader title/file-name rules  -> ParsedRelease
+  matcher.rs    series links, owned-volume bookkeeping, "is this release new?"
+  torrent.rs    minimal bencode reader: file list of a .torrent (size-capped)
+  qbit.rs       qBittorrent Web API client, category/save-path, scoped pause/resume
+  power.rs      UPower + KWin tablet-mode watcher (D-Bus via gio, no polling)
+  secret.rs     qBittorrent password in the Secret Service (KWallet)
+  archive.rs    CBZ/ZIP/CBR/7z page extraction into the page cache
+  mod.rs        scheduler tying the above together
+```
+
+Dependencies: `quick-xml` for RSS, `regex`, `zip` for CBZ/ZIP; CBR/7z through the installed `7z` (or `unar`) command so no non-free unrar library is linked. No async runtime (consistent with the blocking `ureq` decision).
+
+### Data model (SQLite, same database file)
+
+- `nyaa_uploaders(name PRIMARY KEY, enabled, category DEFAULT '3_1')` — seeded with UploaderA, UploaderB, UploaderC, UploaderD, UploaderE, UploaderF; add/remove/disable in Settings.
+- `nyaa_releases(info_hash PRIMARY KEY, uploader, title, size, pub_date, link, state, link_id, qbit_hash, first_seen)` — `state`: `seen`, `matched`, `queued`, `downloading`, `done`, `skipped`, `failed`. Dedup key is the info hash.
+- `nyaa_links(id, source, manga_id, uploader, query, mode, include_regex, exclude_regex, folder)` — one row per linked series: the library series (`source`+`manga_id`), the uploader, the search phrase, the mode (auto-download / notify only) and the local folder the volumes go to.
+- `nyaa_volumes(link_id, volume, file_path, info_hash)` — what is already on disk; filled from finished torrents and from a folder scan, so manually added files count too.
+
+### Polling (RSS only, no site browsing)
+
+- One request per enabled uploader per cycle, `c=3_0`/`3_1` as configured, spaced ~2 s apart, with `If-Modified-Since` (a `304` costs nothing). Default interval **60 minutes**, minimum 15 (the server caches for 5). Honest `User-Agent` (`manga-reader/<version>`).
+- Per link, a targeted query `u=<uploader>&q=<phrase>` is used only when the link is created, on "Check now", and about once a day, because the 75-item uploader feed only shows recent releases; this is how back-catalogue volumes are found.
+- The timer only exists while the app runs and is skipped while on battery in tablet mode (see Power policy). No wake-ups otherwise.
+
+### Matching and number extraction (requirement 4)
+
+- Rules live in `rules.toml` (defaults embedded in the binary, an optional user copy under `~/.config/manga-reader/` overrides it). Each uploader has an ordered list of regexes with named groups (`title`, `vol`, `vol_end`, `ch`, `ch_end`, `year`, `group`, `publisher`), plus filters:
+
+```toml
+[uploader.UploaderA]
+accept_ext   = ["cbz", "zip", "cbr", "7z", "rar"]
+reject_title = ['\[Audiobook\]', 'Chapter Updates - Week']
+patterns = [
+  '^(?P<title>.+?) v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:,(?P<ch>\d+)(?:-(?P<ch_end>\d+))?)? \(',
+  '^(?P<title>.+?) (?P<ch>\d+)-(?P<ch_end>\d+) as v(?P<vol>\d+)-(?P<vol_end>\d+) \(',
+  '^(?P<title>.+?) \(\d{4}',          # no volume: whole run / one-shot
+]
+[uploader.UploaderF]
+prefer_variant = ["Empire", "repack"]  # which of two variants of one release to take
+```
+
+- A parsed release yields a title plus a set of volume numbers and chapter ranges. Titles are normalised (case, punctuation, `&`/`and`, leading `The`) before comparing with the link's phrase, which is an include phrase plus optional exclude regex.
+- The same rules parse **file names inside a torrent** (one volume per `.cbz`), which is what decides what to download.
+- Unit tests are table-driven from the real titles above and the file names seen inside the torrents; every rule change must keep them green.
+
+### Link once, find new volumes automatically (requirement 3)
+
+On a library series: **"Link to Nyaa…"** asks for an uploader (dropdown of the followed ones) and a search phrase (prefilled with the series title), runs the targeted query, shows what it found (parsed volumes), and saves the link. After that the scheduler checks each cycle: parse new items from that uploader, keep those whose normalised title matches, compute the volumes they would add versus `nyaa_volumes`, and either queue them (mode *auto*) or show "New: v14" for one tap (mode *notify*).
+
+### qBittorrent integration (Web API v2, localhost)
+
+- **Endpoint:** `http://127.0.0.1:<port>/api/v2/` (default port 8080, configurable). Installed here: qBittorrent 5.2.4 (v5 uses `torrents/stop` and `torrents/start`; the client reads `app/webapiVersion` and falls back to `pause`/`resume` on older versions).
+- **Own scope, strictly:**
+  - category `manga-reader`, created with its own save path if missing, and never edited otherwise; every torrent we add also gets the tag `manga-reader`;
+  - we remember the info hashes we added (`nyaa_releases.qbit_hash`); status queries use `torrents/info?category=manga-reader`; pause/resume/delete always pass **explicit hashes of our own torrents**, never `all`, never torrents of other categories; no global qBittorrent setting is read-modified-written.
+- **Adding a release:** the app downloads the small `.torrent` itself, reads its file list (bencode, size-capped), then calls `torrents/add` **paused** with `category`, `tags`, `savepath=<series folder>` and `contentLayout=NoSubfolder`; sets `torrents/filePrio` to 0 for non-archive files (epub/pdf/audio/images) and for volumes already owned; then starts it. If nothing remains to download, the torrent is not added at all. Free disk space is checked first, and a per-torrent size cap applies (default 4 GiB, see Open decisions).
+- **Progress:** `torrents/info?category=manga-reader` every ~15 s **only while something of ours is active and the app is open**; no timer otherwise. On completion (progress 1.0) the files are indexed into `nyaa_volumes`, the series shows "downloaded", and the seeding policy is applied with `torrents/setShareLimits` on our hashes only.
+- **Authentication:** default is "Bypass authentication for clients on localhost", i.e. no credentials. If the user has a password instead: username in settings, **password only in the Secret Service** (KWallet's `ksecretd` is running here) written with `secret-tool store` (password through stdin, never argv, never logged, never in `config` or the repository). The `SID` cookie is kept in memory only. Requests send a matching `Referer`/`Origin` for qBittorrent's CSRF check.
+- **qBittorrent not reachable — clear messages instead of silent failure:** a connection error shows "qBittorrent is not running or its Web UI is disabled" with the exact steps (Tools → Options → Web UI → *Web User Interface (Remote control)*, and optionally *Bypass authentication for clients on localhost*) and a *Retry* button; `401` → "qBittorrent wants a password" with a field that stores it in the Secret Service; `403` → "qBittorrent rejected the request (host header / CSRF settings)". Queued items wait in the database and are retried; nothing is lost. **Current state of this machine:** qBittorrent is installed but not running and its profile has no Web UI settings, so the Web UI is disabled — the app cannot enable it from outside and will show the setup steps.
+
+### Power policy (battery + tablet mode)
+
+- Signals, no polling: UPower `org.freedesktop.UPower.OnBattery` (system bus) and KWin `org.kde.KWin.TabletModeManager.tabletMode` (session bus), both through `gio::DBusProxy` property-change notifications.
+- **Pause** our hashes when `on_battery && tablet_mode`; **resume** them when that condition ends (charger plugged in, or tablet mode left). Only `manga-reader` torrents are paused or resumed, and only ones this policy paused (so a torrent the user paused by hand stays paused). RSS polling is also skipped under that condition.
+- Limitation to state in the UI: the policy runs inside this app, so it only acts while the app is open; if the app is closed qBittorrent keeps downloading. (A background service would be a separate, larger feature.)
+
+### Archives as "downloaded" local content (requirement 5)
+
+- **Placement:** torrents download straight into `<nyaa root>/<Series>/` (per-torrent `savepath`), so qBittorrent keeps seeding the very files the reader opens — no copies, no hardlinks.
+- **Local source extension:** `LocalSource` learns that a series folder may contain archives: each `.cbz/.zip/.cbr/.rar/.7z` is one "chapter" (named after the volume, ordered by parsed volume number), next to the existing folder-per-chapter layout. These series appear in the Library with a "downloaded" mark and in the Downloads place.
+- **Reading:** the first open extracts the volume's image entries (natural order, images only) into the page cache `~/.cache/manga-reader/archives/<hash>/` on a low-priority thread, writes a `pages.json` like finished downloads do, and the existing StripView pipeline takes over unchanged (sizes from image headers, tiling, progress saving). ZIP/CBZ via the `zip` crate; RAR/CBR/7z via `7z x -o<dir>`. Extracted volumes count towards the existing 1 GiB cache trimming (oldest first); archives are never modified.
+- **Safety:** entry names are sanitised (no `..`, no absolute paths), only image extensions are written, and entry count/size caps stop zip bombs; the external tool runs with a timeout and low priority.
+- **Series page:** an online series (e.g. ExampleSite) cannot be merged chapter-by-chapter with volume files (different numbering). The link therefore creates/uses a **separate local series** and the linked library entry gets a button "Volumes on disk (N)" that opens it.
+
+### UI
+
+- Sidebar place **Nyaa**, three small pages: *Releases* (recent items from the followed uploaders with their state, filter box, "Download"/"Skip"), *Links* (linked series, mode, last check, "Check now", unlink), *Settings* (uploaders add/remove/enable, interval, category scope, size cap, seeding policy, qBittorrent address/port/username, connection test with the status banner above).
+- Library series page: **Link to Nyaa…** and **Volumes on disk**. Retro theme, touch targets ≥ 44 px, no animations.
+
+### Resource budget
+
+No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent polling only while torrents of ours are active; D-Bus is event-driven; extraction and parsing at nice 10 / idle I/O; the heavy network and disk work happens in qBittorrent and is paused on battery in tablet mode.
+
+### Testing strategy
+
+1. Table-driven rule tests from the real titles and torrent file names (fixtures saved under `tests/fixtures/nyaa/`).
+2. RSS parser tests from saved feeds; a fake HTTP server for conditional GET / `304`.
+3. qBittorrent client against a **throw-away real instance** started with `qbittorrent --profile=<tmpdir> --webui-port=<free port>` (own profile, own port, never the user's torrents); plus a tiny mock server for error paths (refused, 401, 403). A locally generated torrent whose data already exists completes instantly after a recheck, which exercises the completion path without any network.
+4. Archive tests with generated CBZ/ZIP/7z/RAR samples including hostile ones (`../` names, huge entry counts).
+5. Power policy tested with a fake D-Bus service for `OnBattery`/`tabletMode` transitions; the "only our hashes" rule has a dedicated test.
+
+### Milestones
+
+1. Rules + RSS parser + database tables (no network side effects), fixtures and tests.
+2. qBittorrent client, status banner, secret storage, isolated-instance integration test.
+3. Links, matcher and the add-torrent pipeline (file selection, size/space guards).
+4. Archive support in `LocalSource`, extraction cache, "downloaded" display and Library integration.
+5. Power policy and the Nyaa pages/Settings UI.
+
+### Risks
+
+- Name patterns change or are inconsistent between releases → rules are data, covered by fixtures, and unmatched items stay visible in *Releases* instead of being dropped.
+- Large packs (15 GiB) can fill the disk → size cap and free-space check before adding.
+- qBittorrent's Web UI is off by default → explicit onboarding message; the app cannot enable it.
+- RAR support depends on the installed `7z`/`unar` → missing tools produce a clear "install 7zip" message for that volume only.
+
+### Open decisions (waiting for the owner)
+
+1. **Category scope:** `3_0` (all Literature incl. Raw and Non-English) or only `3_1` English-translated? *Proposed: `3_1`.*
+2. **Non-manga files:** skip EPUB/audiobooks/PDF entirely (UploaderC and UploaderF post many)? *Proposed: skip.*
+3. **Auto vs notify:** new volumes of a linked series are queued automatically, or shown first for one tap? And the size cap per torrent. *Proposed: auto for linked series, cap 4 GiB, larger ones need one tap.*
+4. **Download folder:** category save path `~/Manga/Nyaa/` with a sub-folder per series. *Proposed as above.*
+5. **Seeding:** keep seeding until ratio 1.0 / 24 h, or stop immediately after completion? *Proposed: ratio 1.0 or 24 h, whichever first.*
+6. **Power policy wording:** pause only when on battery **and** in tablet mode; resume when plugged in **or** tablet mode ends — correct? And is "only while the app is open" acceptable?
+7. **Linked series model:** separate local series cross-linked to the online entry (proposed) versus trying to merge volumes into the online series page.
+8. **Variants and packs:** for UploaderF's repack/Empire pairs which variant wins; skip UploaderB's weekly chapter packs and "Digital-Compilation" releases? *Proposed: prefer Empire, skip weekly packs, include compilations.*
+9. **qBittorrent start-up:** show the setup steps only, or also launch `qbittorrent` when it is not running? Web UI port (8080?).
+10. **Poll interval:** default 60 minutes OK?
+
 ## Development and testing
 
 - Hands-free measurement: `MANGA_FRAME_STATS=1 MANGA_AUTOSCROLL=<px/s> [MANGA_AUTOZOOM=1] MANGA_AUTOSCROLL_SECS=<n> target/release/manga-reader` prints every frame over 20 ms and a summary at exit. `MANGA_WINDOWED=1` skips full screen, `MANGA_OPEN_PANEL=1` opens the panel at start.
