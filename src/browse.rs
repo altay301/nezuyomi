@@ -205,11 +205,20 @@ impl BrowseView {
     // ---- modes ---------------------------------------------------------------
 
     pub fn show_library(self: &Rc<Self>, db: Arc<Db>) {
+        self.show_entries(move || db.library(), "Your library is empty. Open Browse and add a series.", "series in your library");
+    }
+
+    /// Series with at least one finished download (readable without a network).
+    pub fn show_downloads(self: &Rc<Self>, db: Arc<Db>) {
+        self.show_entries(move || db.downloaded_series(), "Nothing downloaded yet. Open a series and press Download.", "downloaded series");
+    }
+
+    fn show_entries(self: &Rc<Self>, load: impl FnOnce() -> Vec<LibraryEntry> + Send + 'static, empty: &'static str, noun: &'static str) {
         self.toolbar.set_visible(false);
         self.clear();
         let epoch = self.epoch.get();
         let this = self.clone();
-        background(move || db.library(), move |entries: Vec<LibraryEntry>| {
+        background(load, move |entries: Vec<LibraryEntry>| {
             if this.epoch.get() != epoch {
                 return;
             }
@@ -217,8 +226,8 @@ impl BrowseView {
                 this.add_card(&e.source, &MangaSummary { id: e.manga_id.clone(), title: e.title.clone(), cover: e.cover.clone() });
             }
             this.say(&match entries.len() {
-                0 => "Your library is empty. Open Browse and add a series.".to_string(),
-                n => format!("{n} series in your library"),
+                0 => empty.to_string(),
+                n => format!("{n} {noun}"),
             });
         });
     }

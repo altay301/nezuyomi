@@ -12,6 +12,7 @@ use crate::browse::BrowseView;
 use crate::covers::Covers;
 use crate::db::Db;
 use crate::details::DetailsView;
+use crate::downloads::{self, Downloads};
 use crate::ext::JsSource;
 use crate::local::LocalSource;
 use crate::reader::Reader;
@@ -22,7 +23,10 @@ const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
 const BUNDLED_EXTENSIONS: [&str; 1] = [include_str!("../extensions/ExampleSite.js")];
 
 pub fn run() -> glib::ExitCode {
-    let app = gtk::Application::builder().application_id("io.github.altay301.MangaReader").build();
+    // MANGA_NON_UNIQUE=1 lets a test run start next to a running instance instead of
+    // being forwarded to it.
+    let flags = if std::env::var_os("MANGA_NON_UNIQUE").is_some() { gtk::gio::ApplicationFlags::NON_UNIQUE } else { gtk::gio::ApplicationFlags::empty() };
+    let app = gtk::Application::builder().application_id("io.github.altay301.MangaReader").flags(flags).build();
     app.connect_activate(build);
     app.run_with_args(&["manga-reader"])
 }
@@ -108,7 +112,9 @@ fn build(app: &gtk::Application) {
 fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: Arc<Db>, sources: Vec<Arc<dyn Source>>) {
     let covers = Covers::new();
     let browse = BrowseView::new(covers.clone(), sources.clone());
-    let details = DetailsView::new(covers, db.clone());
+    let (dl_tx, dl_rx) = async_channel::unbounded::<downloads::Event>();
+    let dl = Downloads::new(db.clone(), dl_tx);
+    let details = DetailsView::new(covers, db.clone(), dl.clone());
 
     let stats_label = gtk::Label::builder().css_classes(["frame-stats"]).halign(gtk::Align::Start).valign(gtk::Align::Start).can_target(false).visible(stats::enabled()).build();
     let reader = Reader::new(db.clone(), stats::enabled().then_some(&stats_label));
@@ -126,6 +132,8 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     sidebar.append(&gtk::Label::builder().label("Places").xalign(0.0).css_classes(["retro-heading"]).build());
     let library_btn = gtk::ToggleButton::builder().label("Library").css_classes(["retro-place"]).active(true).build();
     sidebar.append(&library_btn);
+    let downloads_btn = gtk::ToggleButton::builder().label("Downloads").css_classes(["retro-place"]).group(&library_btn).build();
+    sidebar.append(&downloads_btn);
     sidebar.append(&gtk::Label::builder().label("Sources").xalign(0.0).css_classes(["retro-heading"]).build());
     let mut source_btns = Vec::new();
     for s in &sources {
@@ -178,6 +186,15 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
         }
     });
     let source_buttons: Vec<(gtk::ToggleButton, Arc<dyn Source>)> = source_btns.clone();
+    downloads_btn.connect_toggled({
+        let a = app.clone();
+        move |b| {
+            if b.is_active() {
+                a.content.set_visible_child_name("grid");
+                a.browse.show_downloads(a.db.clone());
+            }
+        }
+    });
     for (b, s) in source_btns {
         let a = app.clone();
         b.connect_toggled(move |b| {
@@ -202,6 +219,31 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     reader.set_on_exit({
         let a = app.clone();
         move || a.leave_reader()
+    });
+
+    // Download progress: live row updates on the series page and a status line.
+    glib::spawn_future_local({
+        let w = Rc::downgrade(&app);
+        async move {
+            while let Ok(ev) = dl_rx.recv().await {
+                let Some(a) = w.upgrade() else { break };
+                a.details.on_download_event(&ev);
+                match &ev {
+                    downloads::Event::Progress { done, total, .. } => a.status.set_text(&format!("Downloading… {done}/{total} pages")),
+                    downloads::Event::Finished { name, .. } => a.status.set_text(&format!("Downloaded {name}")),
+                    downloads::Event::Failed { name, error, .. } => a.status.set_text(&format!("Download of {name} failed: {error}")),
+                    downloads::Event::Removed { .. } => {}
+                }
+            }
+        }
+    });
+    // Pick up downloads a previous run left unfinished.
+    background({
+        let db = db.clone();
+        move || db.unfinished_downloads()
+    }, {
+        let (dl, sources) = (dl.clone(), app.sources.clone());
+        move |rows| dl.resume(rows, &sources)
     });
 
     // Esc toggles the reader's control panel.
@@ -233,6 +275,9 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     }
     if let Ok(spec) = std::env::var("MANGA_OPEN") {
         app.auto_open(&spec);
+    }
+    if let Ok(spec) = std::env::var("MANGA_DOWNLOAD") {
+        app.auto_download(&spec, dl.clone());
     }
     if let Ok(view) = std::env::var("MANGA_VIEW") {
         app.auto_view(&view, &source_buttons);
@@ -275,6 +320,40 @@ impl App {
         self.details.refresh_progress();
     }
 
+    /// Dev/test hook: `MANGA_DOWNLOAD=<source id>:<manga id>:<chapter index>[:<count>]` queues chapters at start-up.
+    fn auto_download(self: &Rc<Self>, spec: &str, dl: Arc<Downloads>) {
+        let parts: Vec<&str> = spec.split(':').collect();
+        let [sid, mid, idx, rest @ ..] = parts.as_slice() else { return };
+        let (index, count): (usize, usize) = (idx.parse().unwrap_or(0), rest.first().and_then(|c| c.parse().ok()).unwrap_or(1));
+        let Some(source) = self.sources.iter().find(|s| s.id() == *sid).cloned() else { return };
+        let (mid, src) = (mid.to_string(), source.clone());
+        background(
+            move || {
+                let d = src.manga(&mid)?;
+                let mut ch = src.chapters(&mid)?;
+                ch.sort_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
+                Ok::<_, String>((mid, d, ch))
+            },
+            move |r| match r {
+                Ok((mid, d, ch)) => {
+                    for c in ch.into_iter().skip(index).take(count) {
+                        let dir = downloads::chapter_dir(source.id(), &mid, &c.id);
+                        dl.enqueue(source.clone(), crate::db::DownloadRow {
+                            source: source.id().to_string(),
+                            manga_id: mid.clone(),
+                            manga_title: d.title.clone(),
+                            cover: d.cover.clone(),
+                            details: serde_json::to_string(&d).unwrap_or_default(),
+                            chapter: c,
+                            dir: dir.to_string_lossy().into_owned(),
+                        });
+                    }
+                }
+                Err(e) => eprintln!("[app] MANGA_DOWNLOAD: {e}"),
+            },
+        );
+    }
+
     /// Dev/test hook: `MANGA_VIEW=source:<id>` or `details:<source id>:<manga id>`.
     fn auto_view(self: &Rc<Self>, spec: &str, buttons: &[(gtk::ToggleButton, Arc<dyn Source>)]) {
         let mut it = spec.splitn(3, ':');
@@ -297,12 +376,15 @@ impl App {
             return;
         };
         let (mid, this, src) = (mid.to_string(), self.clone(), source.clone());
-        let id = mid.clone();
+        let (id, db) = (mid.clone(), self.db.clone());
         background(
-            move || src.chapters(&id).map(|mut c| {
-                c.sort_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
-                c
-            }),
+            move || {
+                let chapters = src.chapters(&id).or_else(|e| db.offline_series(src.id().to_string(), id.clone()).map(|(_, c)| c).ok_or(e));
+                chapters.map(|mut c| {
+                    c.sort_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
+                    c
+                })
+            },
             move |r| match r {
                 Ok(ch) if index < ch.len() => {
                     let title = mid.clone();

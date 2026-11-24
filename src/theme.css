@@ -143,3 +143,6 @@ flowboxchild:active .cover-card { background: #6666CC; }
 scrollbar slider { min-width: 18px; min-height: 18px; background: #DDDDDD; border: 2px solid; border-color: #FFFFFF #666666 #666666 #FFFFFF; border-radius: 0; }
 scrollbar trough { background: #BBBBBB; border-radius: 0; }
 scrollbar { min-width: 20px; }
+
+button.retro.retro-small { min-height: 36px; min-width: 88px; padding: 0 10px; font-size: 13px; }
+button.retro:disabled label { color: #888888; }

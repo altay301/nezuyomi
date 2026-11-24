@@ -23,7 +23,7 @@ pub struct MangaPage {
     pub has_next: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MangaDetails {
     #[serde(default)]
     pub title: String,

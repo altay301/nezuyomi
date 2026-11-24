@@ -208,7 +208,7 @@ impl Reader {
         let db = self.db.clone();
         let this = self.clone();
         background(
-            move || source.pages(&chapter.id).map(|refs| pages::resolve(&db, refs)),
+            move || pages::load(&db, &*source, &chapter.id),
             move |result| {
                 if this.ctx.borrow().as_ref().map(|c| c.token) != Some(token) {
                     return; // the user already moved on

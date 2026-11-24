@@ -3,6 +3,7 @@ mod browse;
 mod covers;
 mod db;
 mod details;
+mod downloads;
 mod ext;
 mod library;
 mod loader;

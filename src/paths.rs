@@ -23,6 +23,10 @@ pub fn extensions_dir() -> PathBuf {
     data_dir().join("extensions")
 }
 
+pub fn downloads_dir() -> PathBuf {
+    data_dir().join("downloads")
+}
+
 pub fn db_path() -> PathBuf {
     data_dir().join("library.db")
 }
@@ -35,7 +39,7 @@ fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache").join(APP)
 }
 
-fn fnv1a(s: &str) -> u64 {
+pub fn fnv1a(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 

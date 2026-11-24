@@ -9,6 +9,8 @@ use std::sync::mpsc;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::source::{ChapterInfo, MangaDetails};
+
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
 pub struct Db {
@@ -52,6 +54,27 @@ CREATE TABLE IF NOT EXISTS progress (
     PRIMARY KEY (source, chapter_id)
 );
 CREATE INDEX IF NOT EXISTS progress_manga ON progress (source, manga_id);
+-- Downloaded chapters. One flat row per chapter; the series fields repeat so the
+-- Downloads page and offline browsing need no joins.
+CREATE TABLE IF NOT EXISTS downloads (
+    source         TEXT NOT NULL,
+    manga_id       TEXT NOT NULL,
+    chapter_id     TEXT NOT NULL,
+    manga_title    TEXT NOT NULL,
+    cover          TEXT,
+    details        TEXT NOT NULL DEFAULT '{}',
+    chapter_name   TEXT NOT NULL,
+    chapter_number REAL,
+    chapter_date   TEXT,
+    scanlator      TEXT,
+    dir            TEXT NOT NULL,
+    state          INTEGER NOT NULL DEFAULT 0, -- 0 queued, 1 downloading, 2 done, 3 failed
+    done           INTEGER NOT NULL DEFAULT 0,
+    total          INTEGER NOT NULL DEFAULT 0,
+    added          INTEGER NOT NULL,
+    PRIMARY KEY (source, chapter_id)
+);
+CREATE INDEX IF NOT EXISTS downloads_manga ON downloads (source, manga_id);
 -- Image sizes by URL: the reader must know every page height before layout.
 CREATE TABLE IF NOT EXISTS sizes (
     url TEXT PRIMARY KEY,
@@ -211,4 +234,160 @@ impl Db {
             }
         });
     }
+
+    // ---- downloads -----------------------------------------------------------
+
+    /// Adds (or re-queues) a chapter; a finished one is left alone.
+    pub fn queue_download(&self, q: DownloadRow) {
+        self.exec(move |c| {
+            let _ = c.execute(
+                "INSERT INTO downloads (source, manga_id, chapter_id, manga_title, cover, details, chapter_name, chapter_number, chapter_date, scanlator, dir, state, done, total, added)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, strftime('%s','now'))
+                 ON CONFLICT (source, chapter_id) DO UPDATE SET state = 0, done = 0, total = 0
+                 WHERE state <> 2",
+                params![q.source, q.manga_id, q.chapter.id, q.manga_title, q.cover, q.details, q.chapter.name, q.chapter.number, q.chapter.date, q.chapter.scanlator, q.dir],
+            );
+        });
+    }
+
+    pub fn set_download_state(&self, source: String, chapter_id: String, state: i64, done: u32, total: u32) {
+        self.exec(move |c| {
+            let _ = c.execute(
+                "UPDATE downloads SET state = ?3, done = ?4, total = ?5 WHERE source = ?1 AND chapter_id = ?2",
+                params![source, chapter_id, state, done, total],
+            );
+        });
+    }
+
+    pub fn set_download_cover(&self, source: String, manga_id: String, cover: String) {
+        self.exec(move |c| {
+            let _ = c.execute("UPDATE downloads SET cover = ?3 WHERE source = ?1 AND manga_id = ?2", params![source, manga_id, cover]);
+        });
+    }
+
+    /// chapter id -> (state, done pages, total pages)
+    pub fn download_states(&self, source: String, manga_id: String) -> HashMap<String, (i64, u32, u32)> {
+        self.call(move |c| {
+            let mut stmt = match c.prepare("SELECT chapter_id, state, done, total FROM downloads WHERE source = ?1 AND manga_id = ?2") {
+                Ok(s) => s,
+                Err(_) => return HashMap::new(),
+            };
+            stmt.query_map(params![source, manga_id], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Directory of a fully downloaded chapter.
+    pub fn downloaded_dir(&self, source: String, chapter_id: String) -> Option<String> {
+        self.call(move |c| {
+            c.query_row("SELECT dir FROM downloads WHERE source = ?1 AND chapter_id = ?2 AND state = 2", params![source, chapter_id], |r| r.get(0))
+                .optional()
+                .ok()
+                .flatten()
+        })
+        .flatten()
+    }
+
+    /// Series that have at least one finished chapter.
+    pub fn downloaded_series(&self) -> Vec<LibraryEntry> {
+        self.call(|c| {
+            let mut stmt = match c.prepare(
+                "SELECT source, manga_id, MAX(manga_title), MAX(cover) FROM downloads WHERE state = 2 GROUP BY source, manga_id ORDER BY MAX(added) DESC",
+            ) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            stmt.query_map([], |r| Ok(LibraryEntry { source: r.get(0)?, manga_id: r.get(1)?, title: r.get(2)?, cover: r.get(3)? }))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    /// What the series page shows without a network: stored details and the finished chapters.
+    pub fn offline_series(&self, source: String, manga_id: String) -> Option<(MangaDetails, Vec<ChapterInfo>)> {
+        self.call(move |c| {
+            let mut stmt = c
+                .prepare("SELECT details, manga_title, cover, chapter_id, chapter_name, chapter_number, chapter_date, scanlator FROM downloads WHERE source = ?1 AND manga_id = ?2 AND state = 2")
+                .ok()?;
+            let mut details: Option<MangaDetails> = None;
+            let mut chapters = Vec::new();
+            let rows = stmt
+                .query_map(params![source, manga_id], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        ChapterInfo { id: r.get(3)?, name: r.get(4)?, number: r.get(5)?, date: r.get(6)?, scanlator: r.get(7)? },
+                    ))
+                })
+                .ok()?;
+            for (json, title, cover, ch) in rows.flatten() {
+                if details.is_none() {
+                    let mut d: MangaDetails = serde_json::from_str(&json).unwrap_or_default();
+                    d.title = title;
+                    d.cover = cover;
+                    details = Some(d);
+                }
+                chapters.push(ch);
+            }
+            Some((details?, chapters))
+        })
+        .flatten()
+    }
+
+    /// Chapters that were queued or interrupted, oldest first.
+    pub fn unfinished_downloads(&self) -> Vec<DownloadRow> {
+        self.call(|c| {
+            let mut stmt = match c.prepare(
+                "SELECT source, manga_id, manga_title, cover, details, chapter_id, chapter_name, chapter_number, chapter_date, scanlator, dir FROM downloads WHERE state IN (0, 1) ORDER BY added, rowid",
+            ) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            stmt.query_map([], |r| {
+                Ok(DownloadRow {
+                    source: r.get(0)?,
+                    manga_id: r.get(1)?,
+                    manga_title: r.get(2)?,
+                    cover: r.get(3)?,
+                    details: r.get(4)?,
+                    chapter: ChapterInfo { id: r.get(5)?, name: r.get(6)?, number: r.get(7)?, date: r.get(8)?, scanlator: r.get(9)? },
+                    dir: r.get(10)?,
+                })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Forgets a chapter and returns its directory so the caller can delete the files.
+    pub fn delete_download(&self, source: String, chapter_id: String) -> Option<String> {
+        self.call(move |c| {
+            let dir: Option<String> = c
+                .query_row("SELECT dir FROM downloads WHERE source = ?1 AND chapter_id = ?2", params![source, chapter_id], |r| r.get(0))
+                .optional()
+                .ok()
+                .flatten();
+            let _ = c.execute("DELETE FROM downloads WHERE source = ?1 AND chapter_id = ?2", params![source, chapter_id]);
+            dir
+        })
+        .flatten()
+    }
+}
+
+/// A chapter to download together with everything needed to browse it offline.
+#[derive(Clone, Debug)]
+pub struct DownloadRow {
+    pub source: String,
+    pub manga_id: String,
+    pub manga_title: String,
+    pub cover: Option<String>,
+    /// `MangaDetails` as JSON.
+    pub details: String,
+    pub chapter: ChapterInfo,
+    pub dir: String,
 }

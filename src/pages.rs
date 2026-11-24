@@ -10,7 +10,7 @@ use crate::db::Db;
 use crate::library::{PageInfo, Remote};
 use crate::net;
 use crate::paths;
-use crate::source::PageRef;
+use crate::source::{PageRef, Source};
 
 const HEADER_BYTES: usize = 16 * 1024;
 const PARALLEL_HEADER_FETCHES: usize = 6;
@@ -36,6 +36,16 @@ fn fetch_dims(url: &str, headers: &[(String, String)]) -> Option<(u32, u32)> {
         }
     }
     dims_of(&net::get_bytes(url, headers).ok()?)
+}
+
+/// Pages of a chapter: from disk if it was downloaded, otherwise from the source.
+pub fn load(db: &Db, source: &dyn Source, chapter_id: &str) -> Result<Vec<PageInfo>, String> {
+    if let Some(dir) = db.downloaded_dir(source.id().to_string(), chapter_id.to_string()) {
+        if let Some(pages) = crate::downloads::read_manifest(std::path::Path::new(&dir)) {
+            return Ok(pages);
+        }
+    }
+    Ok(resolve(db, source.pages(chapter_id)?))
 }
 
 pub fn resolve(db: &Db, refs: Vec<PageRef>) -> Vec<PageInfo> {
