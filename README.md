@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/icons/hicolor/scalable/apps/io.github.altay301.MangaReader.svg" alt="Nezuyomi logo" width="360">
+  <img src="data/icons/hicolor/scalable/apps/io.github.altay301.Nezuyomi.svg" alt="Nezuyomi logo" width="360">
 </p>
 
 <h1 align="center">Nezuyomi</h1>
@@ -23,7 +23,7 @@ Requires Rust (stable), GTK 4.14+ development files and `mold` (Fedora: `sudo dn
 
 ```sh
 cargo build --release
-./target/release/manga-reader
+./target/release/nezuyomi
 ```
 
 Install the desktop entry and icons:

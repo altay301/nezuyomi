@@ -147,7 +147,7 @@ mod tests {
     fn archives_are_chapters_next_to_folders_and_hidden_dirs_are_not_series() {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let root = std::env::temp_dir().join(format!("manga-reader-local-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("nezuyomi-local-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let series = root.join("Teppeki Honeymoon");
         std::fs::create_dir_all(&series).unwrap();

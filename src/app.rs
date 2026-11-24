@@ -23,7 +23,7 @@ use crate::player::{self, PlayRequest, PlayerEvent};
 use crate::source::{ChapterInfo, MangaSummary, Source, SourceKind};
 use crate::{paths, stats};
 
-pub const APP_ID: &str = "io.github.altay301.MangaReader";
+pub const APP_ID: &str = "io.github.altay301.Nezuyomi";
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
 const BUNDLED_EXTENSIONS: [&str; 2] = [include_str!("../extensions/ExampleSite.js"), include_str!("../extensions/anime.example")];
 
@@ -33,7 +33,7 @@ pub fn run() -> glib::ExitCode {
     let flags = if std::env::var_os("MANGA_NON_UNIQUE").is_some() { gtk::gio::ApplicationFlags::NON_UNIQUE } else { gtk::gio::ApplicationFlags::empty() };
     let app = gtk::Application::builder().application_id(APP_ID).flags(flags).build();
     app.connect_activate(build);
-    app.run_with_args(&["manga-reader"])
+    app.run_with_args(&["nezuyomi"])
 }
 
 /// Runs `work` on a low-priority thread and delivers the result on the main loop.
@@ -122,7 +122,7 @@ fn build(app: &gtk::Application) {
         settings.set_gtk_double_click_time(400);
         settings.set_gtk_double_click_distance(40);
     }
-    let window = gtk::ApplicationWindow::builder().application(app).title("Manga Reader").default_width(1100).default_height(800).css_classes(["retro-window"]).build();
+    let window = gtk::ApplicationWindow::builder().application(app).title("Nezuyomi").default_width(1100).default_height(800).css_classes(["retro-window"]).build();
     window.maximize();
     let loading = gtk::Label::builder().label("Starting…").vexpand(true).hexpand(true).build();
     window.set_child(Some(&loading));

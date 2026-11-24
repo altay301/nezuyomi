@@ -15,6 +15,8 @@ use serde::Deserialize;
 use super::feed::url_encode;
 use crate::net;
 
+// Not renamed with the app: this is the name of the category/tag inside the user's qBittorrent;
+// renaming it would orphan the torrents already added under it.
 pub const CATEGORY: &str = "manga-reader";
 pub const TAG: &str = "manga-reader";
 pub const DEFAULT_PORT: u16 = 8080;

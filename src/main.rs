@@ -22,6 +22,7 @@ mod stats;
 mod strip;
 
 fn main() -> gtk::glib::ExitCode {
+    paths::migrate_legacy_dirs();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--nyaa-probe") {
         std::process::exit(nyaa::probe(&args[1..]));

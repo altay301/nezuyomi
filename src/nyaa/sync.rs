@@ -533,7 +533,7 @@ mod tests {
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("manga-reader-test-{tag}-{}-{}", std::process::id(), now()));
+        let d = std::env::temp_dir().join(format!("nezuyomi-test-{tag}-{}-{}", std::process::id(), now()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

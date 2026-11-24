@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Manga Reader
+Name=Nezuyomi
 GenericName=Manga and anime reader
 Comment=Lightweight manga, webtoon and anime reader for touch and pen
-Exec=manga-reader
-Icon=io.github.altay301.MangaReader
+Exec=nezuyomi
+Icon=io.github.altay301.Nezuyomi
 Terminal=false
 Categories=Graphics;Viewer;
 Keywords=manga;webtoon;comic;anime;reader;

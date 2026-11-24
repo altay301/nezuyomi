@@ -208,7 +208,7 @@ mod tests {
     fn power_policy_isolated() {
         let port: u16 = std::env::var("QBT_TEST_PORT").expect("QBT_TEST_PORT").parse().unwrap();
         let qdir = PathBuf::from(std::env::var("QBT_TEST_DIR").expect("QBT_TEST_DIR"));
-        let tmp = std::env::temp_dir().join(format!("manga-reader-power-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("nezuyomi-power-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let db = Db::open(&tmp.join("db.sqlite")).unwrap();
         let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();

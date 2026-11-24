@@ -46,7 +46,7 @@ pub fn feed_url(uploader: &str, category: &str, query: Option<&str>) -> String {
 }
 
 pub fn user_agent() -> String {
-    format!("manga-reader/{}", env!("CARGO_PKG_VERSION"))
+    format!("nezuyomi/{}", env!("CARGO_PKG_VERSION"))
 }
 
 /// Fetches a feed; `since` (unix seconds) makes it a conditional request.

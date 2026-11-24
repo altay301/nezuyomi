@@ -1,4 +1,4 @@
-# Manga Reader
+# Nezuyomi
 
 Full plan and technology choices: @PLAN.md
 

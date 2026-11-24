@@ -16,7 +16,7 @@ pub const DEFAULT_UPLOADERS: [&str; 6] = ["UploaderA", "UploaderB", "UploaderC",
 /// Literature - English-translated.
 pub const DEFAULT_CATEGORY: &str = "3_1";
 
-/// `manga-reader --nyaa-probe [category]`: fetches the followed uploaders' feeds and reports how
+/// `nezuyomi --nyaa-probe [category]`: fetches the followed uploaders' feeds and reports how
 /// the rules classify every item (no database, no qBittorrent, no downloads).
 pub fn probe(args: &[String]) -> i32 {
     let category = args.first().map_or(DEFAULT_CATEGORY, String::as_str);

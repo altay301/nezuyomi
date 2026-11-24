@@ -1,4 +1,4 @@
-# Manga Reader — Plan
+# Nezuyomi — Plan
 
 A lightweight, extension-based manga/webtoon reader built for tablet-mode use with touch and pen.
 
@@ -247,9 +247,9 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 
 - **Extension engine:** `src/ext/` — QuickJS (`rquickjs`) on its own low-priority thread per extension, started on first use and dropped after 60 s idle. 32 MB memory limit, 30 s call timeout, requests only to the extension's `domains`. HTML via `scraper` behind `doc.select/selectFirst/text/attr/html` handles.
 - **HTTP is blocking (`ureq`, rustls), not `tokio`/`reqwest`:** every network call already runs on a background thread, so an async runtime would only add binary size and wake-ups.
-- **Bundled extension:** `extensions/ExampleSite.js` (endpoints verified against the live API: `/api/search?search=&sortBy=&page=`, `/api/manga/{id}`, `/api/manga/{id}/chapters/list`, chapters with `source: "user"` use `/api/uploads/{id}/images`, others `/api/chapters/{id}/images`; images need a `Referer`). Extra extensions: drop `*.js` into `~/.local/share/manga-reader/extensions/` (same `id` overrides a bundled one). Test one without the UI: `manga-reader --probe <file.js> [query]`, `--probe-raw <file.js> <method> '<json args>'`.
+- **Bundled extension:** `extensions/ExampleSite.js` (endpoints verified against the live API: `/api/search?search=&sortBy=&page=`, `/api/manga/{id}`, `/api/manga/{id}/chapters/list`, chapters with `source: "user"` use `/api/uploads/{id}/images`, others `/api/chapters/{id}/images`; images need a `Referer`). Extra extensions: drop `*.js` into `~/.local/share/nezuyomi/extensions/` (same `id` overrides a bundled one). Test one without the UI: `nezuyomi --probe <file.js> [query]`, `--probe-raw <file.js> <method> '<json args>'`.
 - **Local source:** `~/Manga/<Series>/<Chapter>/` (or the folder given as the first argument) appears as the "Local" source.
-- **Data:** SQLite at `~/.local/share/manga-reader/library.db` (library, per-chapter progress, image-size cache) on a dedicated DB thread; reader progress is flushed at most every 2 s. Downloaded pages and covers are cached under `~/.cache/manga-reader/` and trimmed to 1 GB at start-up.
+- **Data:** SQLite at `~/.local/share/nezuyomi/library.db` (library, per-chapter progress, image-size cache) on a dedicated DB thread; reader progress is flushed at most every 2 s. Downloaded pages and covers are cached under `~/.cache/nezuyomi/` and trimmed to 1 GB at start-up.
 - **Page sizes:** taken from the API when present, else read from the first 16 KB of each image (HTTP range request) and cached, so the whole chapter is laid out before any pixel is decoded.
 - **Main window:** places sidebar (Library + one entry per source), cover grid with infinite scroll, series page with chapter list, status bar. The menu bar from the visual plan is postponed (touch-first; nothing in it is needed yet).
 - **Dev hooks:** `MANGA_OPEN=<source>:<manga id>[:<chapter index>]` opens a chapter at start-up, `MANGA_VIEW=source:<id>` / `details:<source>:<manga id>` shows a page, plus the Phase 0 autoscroll variables.
@@ -258,7 +258,7 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 ## Scope decisions (2026-11-24)
 
 - **Phase 2 reduced to downloads.** Extension repository, history, update checks and the extra places/menu bar are not planned for now.
-- **Downloads (done):** `src/downloads.rs`. One low-priority worker, one chapter at a time, pages sequentially with a 60 ms pause. Files in `~/.local/share/manga-reader/downloads/<source>/<series>/<chapter>/` plus a `pages.json` manifest. The queue survives restarts. Finished chapters open from disk, and the series page falls back to stored details when the source is unreachable (verified in a network-less namespace with `unshare -rn`). The sidebar has a "Downloads" place.
+- **Downloads (done):** `src/downloads.rs`. One low-priority worker, one chapter at a time, pages sequentially with a 60 ms pause. Files in `~/.local/share/nezuyomi/downloads/<source>/<series>/<chapter>/` plus a `pages.json` manifest. The queue survives restarts. Finished chapters open from disk, and the series page falls back to stored details when the source is unreachable (verified in a network-less namespace with `unshare -rn`). The sidebar has a "Downloads" place.
 - **SiteB (blocked):** see `extensions/experimental/README.md`.
 - **Phase 3 skipped.** The Suwayomi bridge needs a JVM process (typically 300–600 MB RAM, seconds of start-up, constant GC work), which conflicts with the low-heat goal. Revisit only if a needed source exists nowhere else. Categories, backup and tracking are also postponed.
 - **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). `extensions/anime.example` is ported from anime-cli (search page → episode list API → server list API → EmbedHost embed → config blob `base64(json XOR "otaku-embed-v1")` → HLS master playlist). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
@@ -328,7 +328,7 @@ Dependencies: `quick-xml` for RSS, `regex`, `zip` for CBZ/ZIP; CBR/7z through th
 
 ### Matching and number extraction (requirement 4)
 
-- Rules live in `rules.toml` (defaults embedded in the binary, an optional user copy under `~/.config/manga-reader/` overrides it). Each uploader has an ordered list of regexes with named groups (`title`, `vol`, `vol_end`, `ch`, `ch_end`, `year`, `group`, `publisher`), plus filters:
+- Rules live in `rules.toml` (defaults embedded in the binary, an optional user copy under `~/.config/nezuyomi/` overrides it). Each uploader has an ordered list of regexes with named groups (`title`, `vol`, `vol_end`, `ch`, `ch_end`, `year`, `group`, `publisher`), plus filters:
 
 ```toml
 [uploader.UploaderA]
@@ -372,7 +372,7 @@ On a library series: **"Link to Nyaa…"** asks for an uploader (dropdown of the
 
 - **Placement:** torrents download straight into `<nyaa root>/<Series>/` (per-torrent `savepath`), so qBittorrent keeps seeding the very files the reader opens — no copies, no hardlinks.
 - **Local source extension:** `LocalSource` learns that a series folder may contain archives: each `.cbz/.zip/.cbr/.rar/.7z` is one "chapter" (named after the volume, ordered by parsed volume number), next to the existing folder-per-chapter layout. These series appear in the Library with a "downloaded" mark and in the Downloads place.
-- **Reading:** the first open extracts the volume's image entries (natural order, images only) into the page cache `~/.cache/manga-reader/archives/<hash>/` on a low-priority thread, writes a `pages.json` like finished downloads do, and the existing StripView pipeline takes over unchanged (sizes from image headers, tiling, progress saving). ZIP/CBZ via the `zip` crate; RAR/CBR/7z via `7z x -o<dir>`. Extracted volumes count towards the existing 1 GiB cache trimming (oldest first); archives are never modified.
+- **Reading:** the first open extracts the volume's image entries (natural order, images only) into the page cache `~/.cache/nezuyomi/archives/<hash>/` on a low-priority thread, writes a `pages.json` like finished downloads do, and the existing StripView pipeline takes over unchanged (sizes from image headers, tiling, progress saving). ZIP/CBZ via the `zip` crate; RAR/CBR/7z via `7z x -o<dir>`. Extracted volumes count towards the existing 1 GiB cache trimming (oldest first); archives are never modified.
 - **Safety:** entry names are sanitised (no `..`, no absolute paths), only image extensions are written, and entry count/size caps stop zip bombs; the external tool runs with a timeout and low priority.
 - **Series page:** an online series (e.g. ExampleSite) cannot be merged chapter-by-chapter with volume files (different numbering). The link therefore creates/uses a **separate local series** and the linked library entry gets a button "Volumes on disk (N)" that opens it.
 
@@ -410,6 +410,9 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 
 ### Decisions (answered 2026-11-25)
 
+(The app was renamed **Nezuyomi** afterwards. The category/tag name `manga-reader` inside qBittorrent and the keyring attribute `manga-reader` were deliberately kept, so torrents and a stored password added earlier stay recognised. Data written under `~/.local/share/manga-reader` etc. is moved to `nezuyomi` at start-up.)
+
+
 1. **Category scope:** `3_0` (all Literature incl. Raw and Non-English) or only `3_1` English-translated? *Proposed: `3_1`.*
 2. **Non-manga files:** skip EPUB/audiobooks/PDF entirely (UploaderC and UploaderF post many)? *Proposed: skip.*
 3. **Auto vs notify:** new volumes of a linked series are queued automatically, or shown first for one tap? And the size cap per torrent. *Proposed: auto for linked series, cap 4 GiB, larger ones need one tap.*
@@ -429,13 +432,13 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 - **Real end-to-end run** (isolated qBittorrent, isolated data folder, one real 81 MiB release from the live swarm): cycle → match → `.torrent` fetched and hash-verified → added paused → file priorities → started → downloaded → timer poll → `done` → volume recorded → the CBZ appears in the Nyaa place with its cover and opens in the normal reader. That run also caught a real bug (an early `return` in the UI event loop ended event handling at start-up).
 - **Safety nets that exist and are tested:** only our category/hashes are ever passed to qBittorrent (`all` and malformed hashes are refused; a torrent in another category and one the user stopped by hand survive stop/start/policy calls untouched); the downloaded `.torrent`'s info hash must equal the feed's; torrent files, archive entries and folder names are sanitised; the torrent URL must be a `nyaa.si/download/*.torrent` link; size cap, free-space check and per-torrent file selection (owned volumes, EPUB and other series are set to priority 0).
 - **Where things are:** `src/nyaa/` (`rules` + `rules.toml`, `feed`, `matcher`, `torrent`, `qbit`, `secret`, `store`, `sync`, `service`, `power`), `src/nyaa_ui.rs` (the Nyaa place and the link window), `src/archive.rs` (CBZ/ZIP in-process, CBR/RAR/7z through `7z`), `LocalSource` (archives as chapters; a second instance "Nyaa").
-- **Testing tools:** `manga-reader --nyaa-probe` classifies the live feeds; `tools/qbt-test-instance.sh start|stop` runs a throw-away headless qBittorrent (own profile and port); the integration tests marked `#[ignore]` use it: `QBT_TEST_PORT=18080 QBT_TEST_DIR=<dir> cargo test --release qbit_isolated nyaa_end_to_end power_policy_isolated -- --ignored`.
+- **Testing tools:** `nezuyomi --nyaa-probe` classifies the live feeds; `tools/qbt-test-instance.sh start|stop` runs a throw-away headless qBittorrent (own profile and port); the integration tests marked `#[ignore]` use it: `QBT_TEST_PORT=18080 QBT_TEST_DIR=<dir> cargo test --release qbit_isolated nyaa_end_to_end power_policy_isolated -- --ignored`.
 - **Editions (colored vs black & white), added after a real report:** a colored release has the same volume numbers as the standard one, so volume bookkeeping per series made it look "already owned" (and its files, `Volume 01 - Title.cbz`, carry no series title and no `v01`, so they were not understood at all). Now a release is classified as `standard` or `colored` from its title (the word *Colored*/*Colour*, or *Full Color*/*Digital Colored*, standing alone; a hyphenated title word such as "Seven-Colored" does not count), a link has an edition, and a series can be linked once per edition: the colored link downloads into its own folder `<Series> (Colored)` and keeps its own volume list. File names without the series title ("Volume 01 - …", "Vol. 3", "Altercolor. Vol26-Ch105") are understood and inherit the match of their torrent. Databases from earlier versions are upgraded in place, and releases that were skipped as "nothing new" or "other variant" are looked at again once.
 - **Not done / limits:** the power policy runs only while the app is open; no per-series custom exclude field in the link window (the column exists in the database, the isolated run used it); series linked in the library are matched by phrase only (no cover/ID matching); CBR/7z covers are not generated (only CBZ), such series show a placeholder until a volume is opened.
 
 ## Development and testing
 
-- Hands-free measurement: `MANGA_FRAME_STATS=1 MANGA_AUTOSCROLL=<px/s> [MANGA_AUTOZOOM=1] MANGA_AUTOSCROLL_SECS=<n> target/release/manga-reader` prints every frame over 20 ms and a summary at exit. `MANGA_WINDOWED=1` skips full screen, `MANGA_OPEN_PANEL=1` opens the panel at start.
+- Hands-free measurement: `MANGA_FRAME_STATS=1 MANGA_AUTOSCROLL=<px/s> [MANGA_AUTOZOOM=1] MANGA_AUTOSCROLL_SECS=<n> target/release/nezuyomi` prints every frame over 20 ms and a summary at exit. `MANGA_WINDOWED=1` skips full screen, `MANGA_OPEN_PANEL=1` opens the panel at start.
 - Test data: `python3 tools/gen_test_strips.py` writes sample chapters to `~/Manga/TestSeri`.
 
 - Development happens directly on the Yoga (Fedora KDE, Claude Code CLI) — touch/pen/heat can only be tested on the real device

@@ -120,7 +120,7 @@ fn build(raw: &RawUploader, base: Option<&UploaderRules>) -> Result<UploaderRule
 }
 
 impl Rules {
-    /// Built-in rules, with `~/.config/manga-reader/nyaa-rules.toml` layered on top if it exists.
+    /// Built-in rules, with `~/.config/nezuyomi/nyaa-rules.toml` layered on top if it exists.
     pub fn load() -> Self {
         let user = crate::paths::config_dir().join("nyaa-rules.toml");
         let user_text = std::fs::read_to_string(&user).ok();

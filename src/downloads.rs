@@ -3,7 +3,7 @@
 //! One worker thread at low CPU/I/O priority, one chapter at a time, pages one
 //! after another with a short pause: slow on purpose, so a long queue neither
 //! heats the laptop nor hammers a site. Files live under
-//! `~/.local/share/manga-reader/downloads/<source>/<series>/<chapter>/` with a
+//! `~/.local/share/nezuyomi/downloads/<source>/<series>/<chapter>/` with a
 //! `pages.json` manifest, so a finished chapter opens without any network.
 
 use std::collections::{HashSet, VecDeque};

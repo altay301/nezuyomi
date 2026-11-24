@@ -147,6 +147,15 @@ fn migrate(conn: &mut Connection) {
              COMMIT;",
         );
     }
+    // The data folder was renamed (manga-reader -> nezuyomi): downloads store absolute paths.
+    let renamed: Option<String> = conn.query_row("SELECT value FROM settings WHERE key = 'paths_nezuyomi'", [], |r| r.get(0)).optional().ok().flatten();
+    if renamed.is_none() {
+        let _ = conn.execute(
+            "UPDATE downloads SET dir = replace(dir, '/manga-reader/downloads/', '/nezuyomi/downloads/'), cover = replace(cover, '/manga-reader/downloads/', '/nezuyomi/downloads/')",
+            [],
+        );
+        let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('paths_nezuyomi', '1')", []);
+    }
     // One time: releases skipped as 'nothing new' or 'other variant' under the old matching (which knew
     // no colour editions and no volume-style file names) are looked at again.
     let done: Option<String> = conn.query_row("SELECT value FROM settings WHERE key = 'nyaa_editions_migrated'", [], |r| r.get(0)).optional().ok().flatten();

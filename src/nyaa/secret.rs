@@ -5,6 +5,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+// A stable internal id, deliberately not renamed: stored passwords are looked up by it.
 const SERVICE: &str = "manga-reader";
 const KIND: &str = "qbittorrent-webui";
 
@@ -14,7 +15,7 @@ fn attrs(user: &str) -> [String; 6] {
 
 pub fn store(user: &str, password: &str) -> Result<(), String> {
     let mut child = Command::new("secret-tool")
-        .args(["store", "--label=Manga Reader: qBittorrent Web UI"])
+        .args(["store", "--label=Nezuyomi: qBittorrent Web UI"])
         .args(attrs(user))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

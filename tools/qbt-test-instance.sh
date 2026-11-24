@@ -5,7 +5,7 @@
 # qBittorrent 5.2 only starts the Web UI when a user name and password are set; with
 # "bypass authentication for localhost" the API then needs no login.
 set -euo pipefail
-DIR="${QBT_TEST_DIR:-${TMPDIR:-/tmp}/manga-reader-qbt-test}"
+DIR="${QBT_TEST_DIR:-${TMPDIR:-/tmp}/nezuyomi-qbt-test}"
 PORT="${QBT_TEST_PORT:-18080}"
 case "${1:-}" in
 start)

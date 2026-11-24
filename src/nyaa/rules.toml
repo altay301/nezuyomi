@@ -1,6 +1,6 @@
 # Default rules for turning Nyaa release titles and archive file names into
 # series title + volume/chapter numbers. A user copy at
-# ~/.config/manga-reader/nyaa-rules.toml overrides any uploader table by name
+# ~/.config/nezuyomi/nyaa-rules.toml overrides any uploader table by name
 # (and [default]). Patterns use named groups: title, vol, vol_end, ch, ch_end.
 
 [default]

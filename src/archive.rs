@@ -1,7 +1,7 @@
 //! Comic archives (CBZ/ZIP, CBR/RAR, 7z) as chapters of a local series (PLAN.md → Nyaa →
 //! "Archives as downloaded local content").
 //!
-//! Opening a volume extracts its images once into `~/.cache/manga-reader/archives/<id>/`
+//! Opening a volume extracts its images once into `~/.cache/nezuyomi/archives/<id>/`
 //! (with a `pages.json` manifest like finished downloads) and the normal reader pipeline takes
 //! over. ZIP/CBZ is read in-process; RAR/CBR/7z go through the installed `7z` (or `unar`).
 //! Archives come from the internet: entry names are sanitised, only supported image types are
@@ -296,7 +296,7 @@ mod tests {
     use std::io::Write;
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("manga-reader-arch-{tag}-{}-{}", std::process::id(), SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos()));
+        let d = std::env::temp_dir().join(format!("nezuyomi-arch-{tag}-{}-{}", std::process::id(), SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

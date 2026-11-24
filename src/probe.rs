@@ -1,4 +1,4 @@
-//! `manga-reader --probe <extension.js> [query]`: exercises an extension from the
+//! `nezuyomi --probe <extension.js> [query]`: exercises an extension from the
 //! command line (no GTK) so extension authors can test without the UI.
 
 use crate::ext::JsSource;
@@ -6,7 +6,7 @@ use crate::source::Source;
 
 pub fn run(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("usage: manga-reader --probe <extension.js> [query]");
+        eprintln!("usage: nezuyomi --probe <extension.js> [query]");
         return 2;
     };
     let code = match std::fs::read_to_string(path) {
@@ -61,7 +61,7 @@ fn fail(msg: String) -> i32 {
 /// `--probe-raw <extension.js> <method> <json-args>` prints the raw JSON result.
 pub fn run_raw(args: &[String]) -> i32 {
     let (Some(path), Some(method)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: manga-reader --probe-raw <extension.js> <method> [json-args]");
+        eprintln!("usage: nezuyomi --probe-raw <extension.js> <method> [json-args]");
         return 2;
     };
     let src = match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(JsSource::from_code) {
