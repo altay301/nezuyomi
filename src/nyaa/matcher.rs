@@ -13,7 +13,8 @@ pub fn volumes_of(p: &Parsed) -> Vec<u32> {
 
 /// Does a parsed release belong to the series a link follows?
 pub fn matches_link(parsed: &Parsed, raw_title: &str, query: &str, exclude: &str) -> bool {
-    if !title_matches(&parsed.title, query) {
+    // A file name without the series title ("Volume 01 - ….cbz") inherits the match of its torrent.
+    if !parsed.title.is_empty() && !title_matches(&parsed.title, query) {
         return false;
     }
     if exclude.trim().is_empty() {
@@ -103,6 +104,20 @@ mod tests {
         assert!(!matches_link(&p, "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)", "freya prince", ""));
         assert!(!matches_link(&p, "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)", "prince freya", "(?i)digital"));
         assert!(!matches_link(&p, "x", "prince freya", "("), "a broken exclude regex excludes instead of matching everything");
+    }
+
+    #[test]
+    fn titleless_file_names_inherit_the_torrents_match() {
+        // The colored Steel Ball Run torrent: no series title in any file name.
+        let t = TorrentInfo {
+            name: "Jojo Part 7-) Steel Ball Run".into(),
+            files: ["Volume 01 - September 5th, 1890 San Diego Beach.cbz", "Volume 02 - First Stage, 15,000 Meters.cbz", "Volume 27f.cbz", "Altercolor. Vol26-Ch105.cbz", "readme.txt"]
+                .iter()
+                .map(|p| TorrentFile { path: (*p).into(), size: 100 })
+                .collect(),
+        };
+        let sel = select_files(&rules(), "drgn", "steel ball run", "", &t, &set(&[1]), &set(&[]));
+        assert_eq!(sel.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1, 2, 3], "volume 1 is owned, readme is not an archive");
     }
 
     #[test]

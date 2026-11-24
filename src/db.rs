@@ -96,7 +96,9 @@ CREATE TABLE IF NOT EXISTS nyaa_links (
     auto     INTEGER NOT NULL DEFAULT 1,
     exclude  TEXT NOT NULL DEFAULT '',
     folder   TEXT NOT NULL,
-    UNIQUE (source, manga_id)
+    -- 'standard' or 'colored': a series can be linked once per edition (separate folder and volumes)
+    edition  TEXT NOT NULL DEFAULT 'standard',
+    UNIQUE (source, manga_id, edition)
 );
 CREATE TABLE IF NOT EXISTS nyaa_releases (
     info_hash  TEXT PRIMARY KEY,
@@ -128,6 +130,35 @@ CREATE TABLE IF NOT EXISTS sizes (
 );
 ";
 
+/// Upgrades databases created by older versions.
+fn migrate(conn: &mut Connection) {
+    // nyaa_links gained `edition` and a new uniqueness rule: copy the rows into the new table.
+    if conn.prepare("SELECT edition FROM nyaa_links LIMIT 0").is_err() {
+        let _ = conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE nyaa_links RENAME TO nyaa_links_old;
+             CREATE TABLE nyaa_links (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, manga_id TEXT NOT NULL, title TEXT NOT NULL,
+                 uploader TEXT NOT NULL, query TEXT NOT NULL, auto INTEGER NOT NULL DEFAULT 1, exclude TEXT NOT NULL DEFAULT '',
+                 folder TEXT NOT NULL, edition TEXT NOT NULL DEFAULT 'standard', UNIQUE (source, manga_id, edition));
+             INSERT INTO nyaa_links (id, source, manga_id, title, uploader, query, auto, exclude, folder)
+                 SELECT id, source, manga_id, title, uploader, query, auto, exclude, folder FROM nyaa_links_old;
+             DROP TABLE nyaa_links_old;
+             COMMIT;",
+        );
+    }
+    // One time: releases skipped as 'nothing new' or 'other variant' under the old matching (which knew
+    // no colour editions and no volume-style file names) are looked at again.
+    let done: Option<String> = conn.query_row("SELECT value FROM settings WHERE key = 'nyaa_editions_migrated'", [], |r| r.get(0)).optional().ok().flatten();
+    if done.is_none() {
+        let _ = conn.execute(
+            "UPDATE nyaa_releases SET state = 'seen', link_id = NULL, note = '' WHERE state = 'skipped' AND link_id IS NOT NULL AND (note LIKE 'nothing new%' OR note LIKE 'another variant%')",
+            [],
+        );
+        let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('nyaa_editions_migrated', '1')", []);
+    }
+}
+
 impl Db {
     pub fn open(path: &Path) -> Result<Self, String> {
         if let Some(dir) = path.parent() {
@@ -135,6 +166,7 @@ impl Db {
         }
         let mut conn = Connection::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+        migrate(&mut conn);
         let (tx, rx) = mpsc::channel::<Job>();
         std::thread::Builder::new()
             .name("db".into())

@@ -453,7 +453,7 @@ impl NyaaPage {
     fn link_row(self: &Rc<Self>, l: &Link, owned: usize) -> gtk::Box {
         let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).build();
         text.append(&gtk::Label::builder().label(&l.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build());
-        text.append(&gtk::Label::builder().label(format!("{} · \"{}\" · {owned} volumes on disk", l.uploader, l.query)).xalign(0.0).css_classes(["chapter-note"]).build());
+        text.append(&gtk::Label::builder().label(format!("{} · \"{}\"{} · {owned} volumes on disk", l.uploader, l.query, if l.edition == "colored" { " · colored" } else { "" })).xalign(0.0).css_classes(["chapter-note"]).build());
         let auto = gtk::ToggleButton::builder().label("Auto").css_classes(["retro", "retro-small"]).active(l.auto).valign(gtk::Align::Center).tooltip_text("Download new volumes without asking").build();
         let (db, id) = (self.db.clone(), l.id);
         auto.connect_toggled(move |b| db.nyaa_set_link_auto(id, b.is_active()));
@@ -568,7 +568,7 @@ impl NyaaPage {
 }
 
 /// "Link to Nyaa…": uploader + search phrase, once per series.
-pub fn show_link_dialog(parent: &gtk::Window, uploaders: Vec<String>, phrase: &str, on_confirm: impl Fn(String, String, bool) + 'static) {
+pub fn show_link_dialog(parent: &gtk::Window, uploaders: Vec<String>, phrase: &str, colored: bool, on_confirm: impl Fn(String, String, bool, bool) + 'static) {
     let win = gtk::Window::builder().transient_for(parent).modal(true).title("Link to Nyaa").default_width(520).css_classes(["retro-panel"]).build();
     let title = gtk::Label::builder().label("Link to Nyaa").css_classes(["retro-title"]).hexpand(true).build();
     let titlebar = gtk::Box::builder().css_classes(["retro-titlebar"]).build();
@@ -576,6 +576,8 @@ pub fn show_link_dialog(parent: &gtk::Window, uploaders: Vec<String>, phrase: &s
     let names: Vec<&str> = uploaders.iter().map(String::as_str).collect();
     let dropdown = gtk::DropDown::from_strings(&names);
     let entry = gtk::Entry::builder().text(phrase).css_classes(["retro"]).hexpand(true).build();
+    let edition = gtk::DropDown::from_strings(&["Black & white (standard)", "Colored"]);
+    edition.set_selected(if colored { 1 } else { 0 });
     let auto = gtk::CheckButton::builder().label("Download new volumes automatically").active(true).build();
     let ok = gtk::Button::builder().label("Link").css_classes(["retro"]).build();
     let cancel = gtk::Button::builder().label("Cancel").css_classes(["retro"]).build();
@@ -587,6 +589,8 @@ pub fn show_link_dialog(parent: &gtk::Window, uploaders: Vec<String>, phrase: &s
     body.append(&dropdown);
     body.append(&label("Search phrase (words a release title must contain)", "retro-text"));
     body.append(&entry);
+    body.append(&label("Edition (a colored edition is kept apart, in its own folder)", "retro-text"));
+    body.append(&edition);
     body.append(&auto);
     body.append(&buttons);
     let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -598,10 +602,10 @@ pub fn show_link_dialog(parent: &gtk::Window, uploaders: Vec<String>, phrase: &s
         move |_| w.close()
     });
     ok.connect_clicked({
-        let (w, e, d, a) = (win.clone(), entry.clone(), dropdown.clone(), auto.clone());
+        let (w, e, d, a, ed) = (win.clone(), entry.clone(), dropdown.clone(), auto.clone(), edition.clone());
         move |_| {
             let up = uploaders.get(d.selected() as usize).cloned().unwrap_or_default();
-            on_confirm(up, e.text().trim().to_string(), a.is_active());
+            on_confirm(up, e.text().trim().to_string(), a.is_active(), ed.selected() == 1);
             w.close();
         }
     });

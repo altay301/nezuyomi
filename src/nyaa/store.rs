@@ -37,6 +37,8 @@ pub struct Link {
     /// Optional regex; a release title matching it is ignored.
     pub exclude: String,
     pub folder: String,
+    /// `standard` or `colored`.
+    pub edition: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -86,10 +88,10 @@ fn release_row(r: &rusqlite::Row) -> rusqlite::Result<Release> {
 }
 
 fn link_row(r: &rusqlite::Row) -> rusqlite::Result<Link> {
-    Ok(Link { id: r.get(0)?, source: r.get(1)?, manga_id: r.get(2)?, title: r.get(3)?, uploader: r.get(4)?, query: r.get(5)?, auto: r.get::<_, i64>(6)? != 0, exclude: r.get(7)?, folder: r.get(8)? })
+    Ok(Link { id: r.get(0)?, source: r.get(1)?, manga_id: r.get(2)?, title: r.get(3)?, uploader: r.get(4)?, query: r.get(5)?, auto: r.get::<_, i64>(6)? != 0, exclude: r.get(7)?, folder: r.get(8)?, edition: r.get(9)? })
 }
 
-const LINK_COLS: &str = "id, source, manga_id, title, uploader, query, auto, exclude, folder";
+const LINK_COLS: &str = "id, source, manga_id, title, uploader, query, auto, exclude, folder, edition";
 
 impl Db {
     // ---- settings ----------------------------------------------------------------
@@ -169,12 +171,12 @@ impl Db {
     pub fn nyaa_add_link(&self, l: Link) -> Option<i64> {
         self.call(move |c| {
             c.execute(
-                "INSERT INTO nyaa_links (source, manga_id, title, uploader, query, auto, exclude, folder) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT (source, manga_id) DO UPDATE SET title = excluded.title, uploader = excluded.uploader, query = excluded.query, auto = excluded.auto, exclude = excluded.exclude, folder = excluded.folder",
-                params![l.source, l.manga_id, l.title, l.uploader, l.query, l.auto, l.exclude, l.folder],
+                "INSERT INTO nyaa_links (source, manga_id, title, uploader, query, auto, exclude, folder, edition) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT (source, manga_id, edition) DO UPDATE SET title = excluded.title, uploader = excluded.uploader, query = excluded.query, auto = excluded.auto, exclude = excluded.exclude, folder = excluded.folder",
+                params![l.source, l.manga_id, l.title, l.uploader, l.query, l.auto, l.exclude, l.folder, l.edition],
             )
             .ok()?;
-            c.query_row("SELECT id FROM nyaa_links WHERE source = ?1 AND manga_id = ?2", params![l.source, l.manga_id], |r| r.get(0)).ok()
+            c.query_row("SELECT id FROM nyaa_links WHERE source = ?1 AND manga_id = ?2 AND edition = ?3", params![l.source, l.manga_id, l.edition], |r| r.get(0)).ok()
         })
         .flatten()
     }
@@ -193,7 +195,7 @@ impl Db {
 
     pub fn nyaa_link_for_series(&self, source: &str, manga_id: &str) -> Option<Link> {
         let (s, m) = (source.to_string(), manga_id.to_string());
-        self.call(move |c| c.query_row(&format!("SELECT {LINK_COLS} FROM nyaa_links WHERE source = ?1 AND manga_id = ?2"), params![s, m], link_row).optional().ok().flatten()).flatten()
+        self.call(move |c| c.query_row(&format!("SELECT {LINK_COLS} FROM nyaa_links WHERE source = ?1 AND manga_id = ?2 ORDER BY edition = 'colored', id LIMIT 1"), params![s, m], link_row).optional().ok().flatten()).flatten()
     }
 
     pub fn nyaa_set_link_auto(&self, id: i64, auto: bool) {
@@ -205,7 +207,8 @@ impl Db {
     pub fn nyaa_remove_link(&self, id: i64) {
         self.exec(move |c| {
             let _ = c.execute("DELETE FROM nyaa_links WHERE id = ?1", [id]);
-            let _ = c.execute("UPDATE nyaa_releases SET link_id = NULL, state = 'seen' WHERE link_id = ?1 AND state IN ('matched', 'confirm')", [id]);
+            // Everything that was decided because of this link is open again (skipped ones included).
+            let _ = c.execute("UPDATE nyaa_releases SET link_id = NULL, state = 'seen', note = '' WHERE link_id = ?1 AND state IN ('matched', 'confirm', 'skipped')", [id]);
         });
     }
 

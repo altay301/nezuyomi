@@ -522,8 +522,8 @@ impl App {
                     return;
                 }
                 let (svc, title, id) = (this.nyaa_service.clone(), manga.title.clone(), manga.id.clone());
-                nyaa_ui::show_link_dialog(this.window.upcast_ref(), uploaders, &manga.title, move |uploader, phrase, auto| {
-                    svc.link(source_id.clone(), id.clone(), title.clone(), uploader, phrase, auto);
+                nyaa_ui::show_link_dialog(this.window.upcast_ref(), uploaders, &manga.title, false, move |uploader, phrase, auto, colored| {
+                    svc.link(source_id.clone(), id.clone(), title.clone(), uploader, phrase, auto, colored);
                 });
             },
         );
@@ -532,11 +532,13 @@ impl App {
     /// "Link & download…" on a release from a search: links the Nyaa series itself (title from the
     /// release name) to that uploader, then the next cycle queues everything the link matches.
     fn link_release(self: &Rc<Self>, release: crate::nyaa::store::Release) {
-        let title = self.nyaa_service.series_title_of(&release.uploader, &release.title).unwrap_or_else(|| release.title.clone());
-        let (svc, id) = (self.nyaa_service.clone(), crate::nyaa::sync::sanitize_folder(&title));
+        let (title, colored) = self.nyaa_service.series_info_of(&release.uploader, &release.title).unwrap_or_else(|| (release.title.clone(), false));
+        let svc = self.nyaa_service.clone();
         let (uploader, shown) = (release.uploader.clone(), title.clone());
-        nyaa_ui::show_link_dialog(self.window.upcast_ref(), vec![uploader], &shown, move |uploader, phrase, auto| {
-            svc.link("nyaa".into(), id.clone(), title.clone(), uploader, phrase, auto);
+        nyaa_ui::show_link_dialog(self.window.upcast_ref(), vec![uploader], &shown, colored, move |uploader, phrase, auto, colored| {
+            // The id of a series in the Nyaa place is its folder name; the colored edition's folder says so.
+            let id = if colored { format!("{} (Colored)", crate::nyaa::sync::sanitize_folder(&title)) } else { crate::nyaa::sync::sanitize_folder(&title) };
+            svc.link("nyaa".into(), id, title.clone(), uploader, phrase, auto, colored);
         });
     }
 

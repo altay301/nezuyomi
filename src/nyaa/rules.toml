@@ -15,6 +15,10 @@ patterns = [
   '^(?P<title>.+?) (?P<ch>\d{1,4})-(?P<ch_end>\d{1,4}) as v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:\s|$)',
   # volumes, optionally followed by loose chapters: "v01-13", "v01,009-090", "v05"
   '^(?P<title>.+?) v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:,\s*(?P<ch>\d+)(?:-(?P<ch_end>\d+))?)?(?:\s|$)',
+  # file names without the series title: "Volume 01 - Chapter name", "Vol. 3", "Volume 27f"
+  '(?i)^vol(?:ume)?\.?\s*(?P<vol>\d+)(?:-(?P<vol_end>\d+))?',
+  # ... and with something in front: "Altercolor. Vol26-Ch105"
+  '(?i)\bvol(?:ume)?\.?\s*(?P<vol>\d+)',
   # no volume number at all: the whole run or a one-shot, "Series (2017-2026) (Digital) ..."
   '^(?P<title>.+?) [\(\[]',
 ]

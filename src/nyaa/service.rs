@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::qbit::{Client, QbitError};
-use super::rules::Rules;
+use super::rules::{Edition, Rules};
 use super::store::{self, Link, Release};
 use super::sync::{self, Ctx, NyaaFetcher, Report, Settings};
 use super::secret;
@@ -102,10 +102,11 @@ impl Service {
         !self.db.nyaa_releases_in_states(&[store::DOWNLOADING]).is_empty()
     }
 
-    pub fn link(self: &Arc<Self>, source: String, manga_id: String, title: String, uploader: String, query: String, auto: bool) {
+    pub fn link(self: &Arc<Self>, source: String, manga_id: String, title: String, uploader: String, query: String, auto: bool, colored: bool) {
         self.spawn("link", move |s| {
             let result = s.with_ctx(|ctx| {
-                let link = sync::link_series(ctx, &source, &manga_id, &title, &uploader, &query, auto)?;
+                let edition = if colored { Edition::Colored } else { Edition::Standard };
+                let link = sync::link_series(ctx, &source, &manga_id, &title, &uploader, &query, auto, edition)?;
                 let n = s.db.nyaa_releases_of_link(link.id).iter().filter(|r| r.state != store::SKIPPED || r.note.contains("nothing new")).count();
                 Ok::<_, String>((link, n))
             });
@@ -138,9 +139,9 @@ impl Service {
         });
     }
 
-    /// The series title of a release title (for pre-filling the link window).
-    pub fn series_title_of(&self, uploader: &str, release_title: &str) -> Option<String> {
-        self.rules.parse(uploader, release_title).ok().map(|p| p.title)
+    /// Series title and whether it is a colored edition, from a release title (pre-fills the link window).
+    pub fn series_info_of(&self, uploader: &str, release_title: &str) -> Option<(String, bool)> {
+        self.rules.parse(uploader, release_title).ok().map(|p| (p.title, p.edition == Edition::Colored))
     }
 
     pub fn test_connection(self: &Arc<Self>) {

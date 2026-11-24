@@ -19,9 +19,39 @@ pub enum Kind {
     Run,
 }
 
+/// Colour editions of a series are separate downloads (same volume numbers, different files).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Edition {
+    #[default]
+    Standard,
+    Colored,
+}
+
+impl Edition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Edition::Standard => "standard",
+            Edition::Colored => "colored",
+        }
+    }
+    pub fn parse(s: &str) -> Self {
+        if s == "colored" { Edition::Colored } else { Edition::Standard }
+    }
+}
+
+/// "Colored", "(Colour)", "Full Color", "Digital Colored" as a word of its own. A hyphenated part of a
+/// title ("Seven-Colored Recollections") does not count.
+pub fn detect_edition(name: &str) -> Edition {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?i)(?:^|[\s(\[])(?:colou?red|full[ -]?colou?r(?:ed)?|digital colou?r(?:ed)?)(?:[\s)\]]|$)|[(\[]\s*colou?r\s*[)\]]").unwrap());
+    if re.is_match(name) { Edition::Colored } else { Edition::Standard }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parsed {
+    /// Empty for file names that do not carry the series title ("Volume 01 - Chapter name.cbz").
     pub title: String,
+    pub edition: Edition,
     pub volumes: Vec<u32>,
     pub chapters: Option<(u32, u32)>,
     /// Text of the last `(…)`/`[…]` group: release group(s) and variant tags.
@@ -157,7 +187,8 @@ impl Rules {
             } else {
                 Kind::Volumes
             };
-            return Ok(Parsed { title: c["title"].trim().to_string(), volumes, chapters, variant: last_group(stem), kind });
+            let title = c.name("title").map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            return Ok(Parsed { title, edition: detect_edition(stem), volumes, chapters, variant: last_group(stem), kind });
         }
         Err(Skip::Unparsed)
     }
@@ -279,6 +310,33 @@ mod tests {
         assert_eq!(r.parse("UploaderC", "The Destitute Lady Wants to Marry the Cursed Count v01 [JPEG-XL] [UpC]"), Err(Skip::Rejected));
         assert_eq!(r.parse("UploaderC", "Full Alpha Manga App Rip up to 2026-11-18 [Anon]"), Err(Skip::Rejected));
         assert!(r.parse("UploaderC", "The Destitute Lady Wants to Marry the Cursed Count v01 [UpC]").is_ok());
+    }
+
+    #[test]
+    fn volume_style_file_names_without_a_series_title() {
+        let r = rules();
+        let p = r.parse("drgn", "Volume 01 - September 5th, 1890 San Diego Beach.cbz").unwrap();
+        assert_eq!((p.title.as_str(), vols(&p)), ("", vec![1]));
+        assert_eq!(vols(&r.parse("drgn", "Volume 27f.cbz").unwrap()), vec![27]);
+        assert_eq!(vols(&r.parse("drgn", "Vol. 3.cbz").unwrap()), vec![3]);
+        assert_eq!(vols(&r.parse("drgn", "Altercolor. Vol26-Ch105.cbz").unwrap()), vec![26]);
+        // Real series-style names still win and keep their title.
+        assert_eq!(r.parse("UploaderA", "Prince Freya v01 (2020) (Digital) (UploaderA).cbz").unwrap().title, "Prince Freya");
+    }
+
+    #[test]
+    fn colored_editions_are_recognised_as_a_word() {
+        let r = rules();
+        let c = r.parse("drgn", "JoJo's Bizarre Adventure Part 7-) Steel Ball Run Colored (Single Pages)").unwrap();
+        assert_eq!((c.edition, c.kind), (Edition::Colored, Kind::Run));
+        assert!(c.title.contains("Steel Ball Run"));
+        assert_eq!(r.parse("UploaderB", "Steel Ball Run v01-07 (2025-2026) (Omnibus Edition) (Digital) (UploaderB)").unwrap().edition, Edition::Standard);
+        assert_eq!(detect_edition("Dr. Stone v01 (Digital Colored) (Group)"), Edition::Colored);
+        assert_eq!(detect_edition("Dr. Stone v01 (Full Color) (Group)"), Edition::Colored);
+        assert_eq!(detect_edition("Series v01 [Colour] [UploaderA]"), Edition::Colored);
+        assert_eq!(detect_edition("The Seven Deadly Sins v02 - Seven-Colored Recollections [Vertical] [UploaderA]"), Edition::Standard, "a hyphenated word of the title");
+        assert_eq!(detect_edition("Watercolor Days v01"), Edition::Standard);
+        assert_eq!(detect_edition("The Color of Happiness v01 (Digital) (Group)"), Edition::Standard, "a plain word 'Color' outside brackets");
     }
 
     #[test]
