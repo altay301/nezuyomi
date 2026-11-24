@@ -2,9 +2,11 @@
 
 pub mod feed;
 pub mod matcher;
+pub mod power;
 pub mod qbit;
 pub mod rules;
 pub mod secret;
+pub mod service;
 pub mod store;
 pub mod sync;
 pub mod torrent;
