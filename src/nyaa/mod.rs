@@ -1,7 +1,10 @@
 //! Nyaa torrent downloads for followed uploaders (PLAN.md → "Plan: Nyaa torrent downloads").
 
 pub mod feed;
+pub mod qbit;
 pub mod rules;
+pub mod secret;
+pub mod torrent;
 
 /// Uploaders followed out of the box (editable in Settings later).
 pub const DEFAULT_UPLOADERS: [&str; 6] = ["UploaderA", "UploaderB", "UploaderC", "UploaderD", "UploaderE", "UploaderF"];

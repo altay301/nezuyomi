@@ -293,7 +293,7 @@ fn register_host_functions<'js>(ctx: &Ctx<'js>, shared: &std::rc::Rc<Shared>) ->
             }
             let headers: std::collections::BTreeMap<String, String> = serde_json::from_str(&headers).unwrap_or_default();
             let headers: Vec<(String, String)> = headers.into_iter().collect();
-            let resp = net::request(&method, &url, body.as_deref(), &headers);
+            let resp = net::request(&method, &url, body.as_deref().map(str::as_bytes), &headers);
             sh.last_request.set(Some(Instant::now()));
             match resp {
                 Ok(r) => Ok(serde_json::json!({ "status": r.status, "text": String::from_utf8_lossy(&r.body) }).to_string()),

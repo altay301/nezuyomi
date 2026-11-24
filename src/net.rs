@@ -23,10 +23,18 @@ fn agent() -> &'static ureq::Agent {
 pub struct Response {
     pub status: u16,
     pub body: Vec<u8>,
+    /// Response headers, names lower-cased.
+    pub headers: Vec<(String, String)>,
+}
+
+impl Response {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    }
 }
 
 /// `body` makes it a POST-style request (the method is still taken from `method`).
-pub fn request(method: &str, url: &str, body: Option<&str>, headers: &[(String, String)]) -> Result<Response, String> {
+pub fn request(method: &str, url: &str, body: Option<&[u8]>, headers: &[(String, String)]) -> Result<Response, String> {
     let agent = agent();
     let mut resp = match body {
         None => {
@@ -46,13 +54,18 @@ pub fn request(method: &str, url: &str, body: Option<&str>, headers: &[(String, 
     }
     .map_err(|e| format!("{method} {url}: {e}"))?;
     let status = resp.status().as_u16();
+    let response_headers = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or_default().to_string()))
+        .collect();
     let body = resp
         .body_mut()
         .with_config()
         .limit(MAX_BODY)
         .read_to_vec()
         .map_err(|e| format!("{method} {url}: reading body: {e}"))?;
-    Ok(Response { status, body })
+    Ok(Response { status, body, headers: response_headers })
 }
 
 /// Downloads `url` and fails on any HTTP error status.
