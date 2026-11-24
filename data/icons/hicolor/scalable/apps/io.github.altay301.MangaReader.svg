@@ -8,7 +8,7 @@
   <!-- lavender inset -->
   <rect x="132" y="132" width="760" height="760" fill="#CCCCFF" stroke="#888888" stroke-width="8"/>
 
-  <g transform="translate(108 164) scale(0.8)" stroke="#1a1a2e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(137 158) scale(0.8)" stroke="#1a1a2e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
     <!-- tail: comes out from the bottom of the body (drawn behind it) and runs up,
          parallel to the back and the ear -->
     <path d="M525 815 C640 785 885 760 885 620 C885 540 830 500 800 450 C770 400 715 360 715 290 C715 220 740 130 800 105" fill="none"/>
