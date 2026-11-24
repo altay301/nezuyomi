@@ -10,6 +10,7 @@ mod loader;
 mod local;
 mod net;
 mod pages;
+mod player;
 mod paths;
 mod probe;
 mod reader;

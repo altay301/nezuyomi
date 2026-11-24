@@ -772,6 +772,7 @@ name = "manga-reader"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "base64",
  "ego-tree",
  "fast_image_resize",
  "gtk4",

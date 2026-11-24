@@ -255,6 +255,14 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 - **Dev hooks:** `MANGA_OPEN=<source>:<manga id>[:<chapter index>]` opens a chapter at start-up, `MANGA_VIEW=source:<id>` / `details:<source>:<manga id>` shows a page, plus the Phase 0 autoscroll variables.
 - **Bug found by screenshot:** tiles uploaded as premultiplied RGBA let a not-quite-255 alpha at tile edges blend with the black background (a faint line at every tile boundary). Tiles now use `R8g8b8x8` (alpha ignored) and each tile's bottom edge reuses the next tile's top edge.
 
+## Scope decisions (2026-11-24)
+
+- **Phase 2 reduced to downloads.** Extension repository, history, update checks and the extra places/menu bar are not planned for now.
+- **Downloads (done):** `src/downloads.rs`. One low-priority worker, one chapter at a time, pages sequentially with a 60 ms pause. Files in `~/.local/share/manga-reader/downloads/<source>/<series>/<chapter>/` plus a `pages.json` manifest. The queue survives restarts. Finished chapters open from disk, and the series page falls back to stored details when the source is unreachable (verified in a network-less namespace with `unshare -rn`). The sidebar has a "Downloads" place.
+- **SiteB (blocked):** see `extensions/experimental/README.md`.
+- **Phase 3 skipped.** The Suwayomi bridge needs a JVM process (typically 300–600 MB RAM, seconds of start-up, constant GC work), which conflicts with the low-heat goal. Revisit only if a needed source exists nowhere else. Categories, backup and tracking are also postponed.
+- **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). `extensions/anime.example` is ported from anime-cli (search page → episode list API → server list API → EmbedHost embed → config blob `base64(json XOR "otaku-embed-v1")` → HLS master playlist). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
+
 ## Development and testing
 
 - Hands-free measurement: `MANGA_FRAME_STATS=1 MANGA_AUTOSCROLL=<px/s> [MANGA_AUTOZOOM=1] MANGA_AUTOSCROLL_SECS=<n> target/release/manga-reader` prints every frame over 20 ms and a summary at exit. `MANGA_WINDOWED=1` skips full screen, `MANGA_OPEN_PANEL=1` opens the panel at start.

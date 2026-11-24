@@ -11,7 +11,7 @@ use crate::app::background;
 use crate::covers::Covers;
 use crate::db::{Db, DownloadRow, LibraryEntry, Progress};
 use crate::downloads::{self, Downloads, Event};
-use crate::source::{ChapterInfo, MangaDetails, MangaSummary, Source};
+use crate::source::{ChapterInfo, MangaDetails, MangaSummary, Source, SourceKind};
 
 struct Loaded {
     source: Arc<dyn Source>,
@@ -159,7 +159,7 @@ impl DetailsView {
                 name.set_text(&c.name);
                 row.set_widget_name(&idx.to_string());
                 let dl_state = t.dl_state.borrow().get(&c.id).copied();
-                button.set_visible(l.source.id() != "local" && !l.offline);
+                button.set_visible(l.source.id() != "local" && !l.offline && l.source.kind() == SourceKind::Manga);
                 let (label, dl_note) = match dl_state {
                     Some((downloads::STATE_DONE, ..)) => ("Remove", Some("saved".to_string())),
                     Some((downloads::STATE_RUNNING, done, total)) => ("Cancel", Some(format!("{done}/{total}"))),
@@ -172,7 +172,7 @@ impl DetailsView {
                 if let Some(n) = dl_note { parts.push(n) }
                 if let Some(d) = &c.date { parts.push(d.clone()); }
                 if let Some(s) = &c.scanlator { parts.push(s.clone()); }
-                if p.read { parts.push("✓ read".into()) } else if p.fraction > 0.01 { parts.push(format!("{:.0}%", p.fraction * 100.0)) }
+                if p.read { parts.push(if l.source.kind() == SourceKind::Anime { "✓ watched" } else { "✓ read" }.into()) } else if p.fraction > 0.01 { parts.push(format!("{:.0}%", p.fraction * 100.0)) }
                 note.set_text(&parts.join(" · "));
                 row.set_css_classes(if p.read { &["chapter-row", "chapter-read"] } else { &["chapter-row"] });
             }
@@ -402,10 +402,17 @@ impl DetailsView {
         self.model.splice(0, self.model.n_items(), &refs);
         self.library_btn.set_label(if l.in_library { "Remove from library" } else { "Add to library" });
         self.library_btn.set_sensitive(!l.offline);
+        let anime = l.source.kind() == SourceKind::Anime;
+        self.download_btn.set_visible(!anime);
         self.download_btn.set_sensitive(!l.offline && l.source.id() != "local" && !l.chapters.is_empty());
         self.continue_btn.set_sensitive(!l.chapters.is_empty());
         let started = l.progress.values().any(|p| p.read || p.fraction > 0.01);
-        self.continue_btn.set_label(if started { "Continue reading" } else { "Start reading" });
+        self.continue_btn.set_label(match (anime, started) {
+            (true, true) => "Continue watching",
+            (true, false) => "Start watching",
+            (false, true) => "Continue reading",
+            (false, false) => "Start reading",
+        });
     }
 
     fn toggle_library(&self) {

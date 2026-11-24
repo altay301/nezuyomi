@@ -27,4 +27,4 @@ Full plan and technology choices: @PLAN.md
 
 ## Current phase
 
-Phase 1: MVP (JS extension engine, first source, search, details, chapters, reader, library, progress). Phase 0 is done and measured (see PLAN.md → Phase 0 findings).
+Phases 0, 1, 2 (downloads only) and 4 (anime) are implemented; SiteB is blocked and Phase 3 (Suwayomi) is skipped on purpose: see PLAN.md → *Scope decisions*.

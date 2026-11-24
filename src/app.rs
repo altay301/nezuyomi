@@ -16,11 +16,12 @@ use crate::downloads::{self, Downloads};
 use crate::ext::JsSource;
 use crate::local::LocalSource;
 use crate::reader::Reader;
-use crate::source::{ChapterInfo, MangaSummary, Source};
+use crate::player::{self, PlayRequest, PlayerEvent};
+use crate::source::{ChapterInfo, MangaSummary, Source, SourceKind};
 use crate::{paths, stats};
 
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
-const BUNDLED_EXTENSIONS: [&str; 1] = [include_str!("../extensions/ExampleSite.js")];
+const BUNDLED_EXTENSIONS: [&str; 2] = [include_str!("../extensions/ExampleSite.js"), include_str!("../extensions/anime.example")];
 
 pub fn run() -> glib::ExitCode {
     // MANGA_NON_UNIQUE=1 lets a test run start next to a running instance instead of
@@ -81,6 +82,7 @@ struct App {
     db: Arc<Db>,
     sources: Vec<Arc<dyn Source>>,
     inhibit_cookie: Cell<u32>,
+    player_events: async_channel::Sender<PlayerEvent>,
 }
 
 fn build(app: &gtk::Application) {
@@ -112,6 +114,7 @@ fn build(app: &gtk::Application) {
 fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: Arc<Db>, sources: Vec<Arc<dyn Source>>) {
     let covers = Covers::new();
     let browse = BrowseView::new(covers.clone(), sources.clone());
+    let (pl_tx, pl_rx) = async_channel::unbounded::<PlayerEvent>();
     let (dl_tx, dl_rx) = async_channel::unbounded::<downloads::Event>();
     let dl = Downloads::new(db.clone(), dl_tx);
     let details = DetailsView::new(covers, db.clone(), dl.clone());
@@ -134,12 +137,18 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     sidebar.append(&library_btn);
     let downloads_btn = gtk::ToggleButton::builder().label("Downloads").css_classes(["retro-place"]).group(&library_btn).build();
     sidebar.append(&downloads_btn);
-    sidebar.append(&gtk::Label::builder().label("Sources").xalign(0.0).css_classes(["retro-heading"]).build());
     let mut source_btns = Vec::new();
-    for s in &sources {
-        let b = gtk::ToggleButton::builder().label(s.name()).css_classes(["retro-place"]).group(&library_btn).build();
-        sidebar.append(&b);
-        source_btns.push((b, s.clone()));
+    for (heading, kind) in [("Manga", SourceKind::Manga), ("Anime", SourceKind::Anime)] {
+        let of_kind: Vec<_> = sources.iter().filter(|s| s.kind() == kind).collect();
+        if of_kind.is_empty() {
+            continue;
+        }
+        sidebar.append(&gtk::Label::builder().label(heading).xalign(0.0).css_classes(["retro-heading"]).build());
+        for s in of_kind {
+            let b = gtk::ToggleButton::builder().label(s.name()).css_classes(["retro-place"]).group(&library_btn).build();
+            sidebar.append(&b);
+            source_btns.push((b, s.clone()));
+        }
     }
     let home = gtk::Box::builder().spacing(8).css_classes(["retro-home"]).build();
     home.append(&sidebar);
@@ -162,6 +171,7 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
         db: db.clone(),
         sources,
         inhibit_cookie: Cell::new(0),
+        player_events: pl_tx,
     });
 
     // ---- wiring ----------------------------------------------------------------
@@ -237,6 +247,25 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
             }
         }
     });
+    // mpv finished: refresh the episode list's progress and say what happened.
+    glib::spawn_future_local({
+        let w = Rc::downgrade(&app);
+        async move {
+            while let Ok(ev) = pl_rx.recv().await {
+                let Some(a) = w.upgrade() else { break };
+                match ev {
+                    PlayerEvent::Finished { watched, .. } => {
+                        a.status.set_text(if watched { "Episode watched" } else { "Playback stopped" });
+                        a.details.refresh_progress();
+                    }
+                    PlayerEvent::Failed(e) => {
+                        eprintln!("[player] {e}");
+                        a.status.set_text(&format!("Cannot play: {e}"));
+                    }
+                }
+            }
+        }
+    });
     // Pick up downloads a previous run left unfinished.
     background({
         let db = db.clone();
@@ -300,6 +329,9 @@ impl App {
     }
 
     fn start_reading(&self, source: Arc<dyn Source>, manga: MangaSummary, chapters: Vec<ChapterInfo>, index: usize, start: f64) {
+        if source.kind() == SourceKind::Anime {
+            return self.watch(source, manga, &chapters[index], start);
+        }
         self.pages.set_visible_child_name("reader");
         if std::env::var_os("MANGA_WINDOWED").is_none() {
             self.window.fullscreen();
@@ -307,6 +339,29 @@ impl App {
         self.inhibit_cookie.set(self.gtk_app.inhibit(Some(&self.window), gtk::ApplicationInhibitFlags::IDLE, Some("Reading")));
         self.reader.open(source, manga.id, manga.title, chapters, index, start);
         self.reader.strip().grab_focus();
+    }
+
+    /// Anime: resolve the streams on a background thread, then hand the first one to mpv.
+    fn watch(&self, source: Arc<dyn Source>, manga: MangaSummary, episode: &ChapterInfo, start: f64) {
+        self.status.set_text(&format!("Starting {}…", episode.name));
+        let (db, tx, ep) = (self.db.clone(), self.player_events.clone(), episode.clone());
+        let status = self.status.clone();
+        let sid = source.id().to_string();
+        background(
+            move || source.videos(&ep.id).map(|v| (v, ep)),
+            move |r| match r {
+                Ok((videos, ep)) => {
+                    // Sub first (the extension lists it first); a dub-only episode falls back to the dub.
+                    let Some(video) = videos.into_iter().next() else { return status.set_text("No stream found") };
+                    status.set_text(&format!("Playing {} ({}) in mpv", ep.name, video.label));
+                    player::play(db, PlayRequest { video, title: format!("{} — {}", manga.title, ep.name), source: sid, manga_id: manga.id, chapter_id: ep.id, start_fraction: start }, tx);
+                }
+                Err(e) => {
+                    eprintln!("[watch] {e}");
+                    status.set_text(&format!("Error: {e}"));
+                }
+            },
+        );
     }
 
     fn leave_reader(self: &Rc<Self>) {

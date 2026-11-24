@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::net;
-use crate::source::{ChapterInfo, MangaDetails, MangaPage, PageRef, Source, SourceResult};
+use crate::source::{ChapterInfo, MangaDetails, MangaPage, PageRef, Source, SourceKind, SourceResult, Video};
 
 const PRELUDE: &str = include_str!("prelude.js");
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -43,6 +43,9 @@ pub struct Meta {
     pub base_url: String,
     #[serde(default)]
     pub domains: Vec<String>,
+    /// "manga" (default) or "anime".
+    #[serde(default, rename = "type")]
+    pub kind: String,
 }
 
 struct Msg {
@@ -116,6 +119,12 @@ impl Source for JsSource {
     fn name(&self) -> &str {
         &self.meta.name
     }
+    fn kind(&self) -> SourceKind {
+        if self.meta.kind == "anime" { SourceKind::Anime } else { SourceKind::Manga }
+    }
+    fn videos(&self, episode_id: &str) -> SourceResult<Vec<Video>> {
+        self.call("getVideos", serde_json::json!([episode_id]))
+    }
     fn popular(&self, page: u32) -> SourceResult<MangaPage> {
         self.call("popular", serde_json::json!([page]))
     }
@@ -126,10 +135,11 @@ impl Source for JsSource {
         self.call("search", serde_json::json!([query, page, {}]))
     }
     fn manga(&self, id: &str) -> SourceResult<MangaDetails> {
-        self.call("getManga", serde_json::json!([id]))
+        // Anime extensions name these getAnime / getEpisodes (PLAN.md → Phase 4).
+        self.call(if self.kind() == SourceKind::Anime { "getAnime" } else { "getManga" }, serde_json::json!([id]))
     }
     fn chapters(&self, manga_id: &str) -> SourceResult<Vec<ChapterInfo>> {
-        self.call("getChapters", serde_json::json!([manga_id]))
+        self.call(if self.kind() == SourceKind::Anime { "getEpisodes" } else { "getChapters" }, serde_json::json!([manga_id]))
     }
     fn pages(&self, chapter_id: &str) -> SourceResult<Vec<PageRef>> {
         self.call("getPages", serde_json::json!([chapter_id]))
@@ -361,6 +371,26 @@ fn register_host_functions<'js>(ctx: &Ctx<'js>, shared: &std::rc::Rc<Shared>) ->
         }),
     )?;
 
+    g.set(
+        "__b64",
+        // Base64 -> "binary string": one char per byte, so JS can XOR it with charCodeAt.
+        Func::from(|text: String| -> String {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(text.trim().trim_end_matches('='))
+                .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(text.trim().trim_end_matches('=')))
+                .map(|b| b.into_iter().map(char::from).collect())
+                .unwrap_or_default()
+        }),
+    )?;
+    g.set(
+        "__utf8",
+        // "Binary string" (one char per byte) -> real text.
+        Func::from(|bin: String| -> String {
+            let bytes: Vec<u8> = bin.chars().map(|c| c as u32 as u8).collect();
+            String::from_utf8_lossy(&bytes).into_owned()
+        }),
+    )?;
     g.set("__log", Func::from(|msg: String| eprintln!("[ext] {msg}")))?;
     g.set("__setting", Func::from(|_key: String| -> Option<String> { None }))?;
     Ok(())

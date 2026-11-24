@@ -63,11 +63,47 @@ pub struct PageRef {
     pub height: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceKind {
+    #[default]
+    Manga,
+    Anime,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Subtitle {
+    pub url: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// One playable stream of an episode (PLAN.md → Phase 4). `url` may be an HLS master
+/// playlist: mpv picks the quality itself.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Video {
+    pub url: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub subtitles: Vec<Subtitle>,
+}
+
 pub type SourceResult<T> = Result<T, String>;
 
 pub trait Source: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
+    fn kind(&self) -> SourceKind {
+        SourceKind::Manga
+    }
+    /// Anime sources only: the streams of an episode (`chapters()` lists episodes).
+    fn videos(&self, _episode_id: &str) -> SourceResult<Vec<Video>> {
+        Err(format!("{} has no videos", self.name()))
+    }
     fn popular(&self, page: u32) -> SourceResult<MangaPage>;
     fn latest(&self, page: u32) -> SourceResult<MangaPage>;
     fn search(&self, query: &str, page: u32) -> SourceResult<MangaPage>;

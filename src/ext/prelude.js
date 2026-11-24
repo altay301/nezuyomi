@@ -36,6 +36,15 @@ globalThis.http = {
     return new Doc(__doc_parse(r.text));
   },
 };
+globalThis.html = { parse(text) { return new Doc(__doc_parse(text)); } };
+globalThis.util = {
+  // base64 -> binary string (one char per byte)
+  base64Decode(s) { return __b64(s); },
+  // binary string -> text, decoding UTF-8
+  utf8(bin) { return __utf8(bin); },
+  // text/binary string XOR a repeating key string -> binary string
+  xor(bin, key) { let o = ""; for (let i = 0; i < bin.length; i++) o += String.fromCharCode(bin.charCodeAt(i) ^ key.charCodeAt(i % key.length)); return o; },
+};
 globalThis.log = (...a) => __log(a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" "));
 globalThis.settings = { get(key) { const v = __setting(key); return v === undefined ? null : v; } };
 

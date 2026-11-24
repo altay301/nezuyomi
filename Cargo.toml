@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-channel = "2.5.0"
+base64 = "0.23.1"
 ego-tree = "0.11.1"
 fast_image_resize = "6.2.0"
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }

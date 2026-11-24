@@ -35,6 +35,14 @@ pub fn run(args: &[String]) -> i32 {
         let ch = src.chapters(&m.id)?;
         println!("chapters: {} (first {:?}, last {:?})", ch.len(), ch.first().map(|c| &c.name), ch.last().map(|c| &c.name));
         let c = ch.last().ok_or("no chapters")?;
+        if src.kind() == crate::source::SourceKind::Anime {
+            let videos = src.videos(&c.id)?;
+            println!("videos of '{}': {}", c.name, videos.len());
+            for v in &videos {
+                println!("  [{}] {} headers={:?} subs={:?}", v.label, v.url, v.headers, v.subtitles.iter().map(|s| &s.label).collect::<Vec<_>>());
+            }
+            return Ok(());
+        }
         let pages = src.pages(&c.id)?;
         println!("pages of '{}': {} (first {:?})", c.name, pages.len(), pages.first());
         Ok(())
