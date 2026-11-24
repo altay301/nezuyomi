@@ -262,7 +262,7 @@ impl DetailsView {
                     }
                     Ok((d, chapters, progress, in_library, dl, offline)) => {
                         this.title.set_text(&d.title);
-                        this.meta.set_text(&[d.author.clone(), d.status.clone(), Some(format!("{} chapters", chapters.len()))].into_iter().flatten().collect::<Vec<_>>().join(" · "));
+                        this.meta.set_text(&[d.author.clone(), d.status.clone(), Some(format!("{} {}", chapters.len(), if source.kind() == SourceKind::Anime { "episodes" } else { "chapters" }))].into_iter().flatten().collect::<Vec<_>>().join(" · "));
                         this.genres.set_text(&d.genres.join(", "));
                         this.description.set_text(d.description.as_deref().unwrap_or(""));
                         let mut manga = m2;
@@ -272,12 +272,13 @@ impl DetailsView {
                         }
                         manga.title = d.title.clone();
                         *this.dl_state.borrow_mut() = dl;
+                        let noun = if source.kind() == SourceKind::Anime { "episodes" } else { "chapters" };
                         *this.loaded.borrow_mut() = Some(Loaded { source, manga, chapters, progress, in_library, details: d, offline });
                         this.refresh_rows();
                         this.say(&if offline {
                             format!("Offline: showing {} downloaded chapters", this.model.n_items())
                         } else {
-                            format!("{} chapters", this.model.n_items())
+                            format!("{} {noun}", this.model.n_items())
                         });
                     }
                 }
