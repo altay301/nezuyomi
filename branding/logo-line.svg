@@ -6,8 +6,8 @@
   </clipPath>
   <polygon points="0,0 25,0 362,600 0,600" fill="#1a1a2e" clip-path="url(#snout)"/>
   <g fill="none" stroke="#1a1a2e" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
-    <!-- tail, starts where the ear ends -->
-    <path d="M645 212 C705 100 790 62 830 62 C930 70 955 300 958 425"/>
+    <!-- tail: comes out from the bottom of the body and runs up, parallel to the back and the ear -->
+    <path d="M525 815 C640 785 885 760 885 620 C885 540 830 500 800 450 C770 400 715 360 715 290 C715 220 740 130 800 105"/>
     <!-- head top + ear -->
     <path d="M170 345 Q335 240 515 135 C537 5 607 -5 645 212"/>
     <!-- chin -->

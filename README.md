@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/icons/hicolor/512x512/apps/io.github.altay301.MangaReader.png" alt="Manga Reader logo" width="360">
+  <img src="data/icons/hicolor/scalable/apps/io.github.altay301.MangaReader.svg" alt="Nezuyomi logo" width="360">
 </p>
 
 <h1 align="center">Nezuyomi</h1>
