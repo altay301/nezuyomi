@@ -199,7 +199,9 @@ If a site returns a challenge page, the app opens a small WebKitGTK window and *
 - `w`/`h` can be 0 → read the size from the WebP header (first few hundred bytes); enough for `StripView`
 - Risk: the home page returned 403 to an automated (non-browser) client → test the API endpoints with `curl`/`reqwest` on the Yoga; fall back to the WebView cookie flow if needed
 
-**2. example.org — second.** Shows a Cloudflare challenge page ("Just a moment…") on load that did not pass by itself in an embedded browser. Needs the Cloudflare window flow (the user passes the check); structure to be reviewed after that.
+**2. SiteB — second (blocked, see `extensions/experimental/README.md`).** *Update 2026-11-24:* example.org has no challenge for `curl`, but rejects the app's TLS fingerprint, its image host rejects every request, and its pages are JPEG XL. example.org still shows the original challenge.
+
+Original note: **example.org** Shows a Cloudflare challenge page ("Just a moment…") on load that did not pass by itself in an embedded browser. Needs the Cloudflare window flow (the user passes the check); structure to be reviewed after that.
 
 ### ExtRepo (Mihon extension repository) — reference source
 
