@@ -75,6 +75,51 @@ CREATE TABLE IF NOT EXISTS downloads (
     PRIMARY KEY (source, chapter_id)
 );
 CREATE INDEX IF NOT EXISTS downloads_manga ON downloads (source, manga_id);
+-- Key/value settings (Nyaa interval, qBittorrent port, ...). No secrets: passwords live in the Secret Service.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Nyaa: followed uploaders, linked series, seen releases and the volumes we own.
+CREATE TABLE IF NOT EXISTS nyaa_uploaders (
+    name         TEXT PRIMARY KEY,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    last_checked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS nyaa_links (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    source   TEXT NOT NULL,
+    manga_id TEXT NOT NULL,
+    title    TEXT NOT NULL,
+    uploader TEXT NOT NULL,
+    query    TEXT NOT NULL,
+    auto     INTEGER NOT NULL DEFAULT 1,
+    exclude  TEXT NOT NULL DEFAULT '',
+    folder   TEXT NOT NULL,
+    UNIQUE (source, manga_id)
+);
+CREATE TABLE IF NOT EXISTS nyaa_releases (
+    info_hash  TEXT PRIMARY KEY,
+    uploader   TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    size       INTEGER NOT NULL DEFAULT 0,
+    pub_date   TEXT NOT NULL DEFAULT '',
+    link       TEXT NOT NULL DEFAULT '',
+    state      TEXT NOT NULL,
+    link_id    INTEGER,
+    volumes    TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT '',
+    first_seen INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS nyaa_releases_state ON nyaa_releases (state);
+CREATE INDEX IF NOT EXISTS nyaa_releases_link ON nyaa_releases (link_id);
+CREATE TABLE IF NOT EXISTS nyaa_volumes (
+    link_id   INTEGER NOT NULL,
+    volume    INTEGER NOT NULL, -- 0 = the whole run / a one-shot without volume numbers
+    file_path TEXT NOT NULL,
+    info_hash TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (link_id, volume)
+);
 -- Image sizes by URL: the reader must know every page height before layout.
 CREATE TABLE IF NOT EXISTS sizes (
     url TEXT PRIMARY KEY,

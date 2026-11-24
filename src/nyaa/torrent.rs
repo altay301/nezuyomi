@@ -92,6 +92,28 @@ fn safe_component(c: &str) -> bool {
     !(c.is_empty() || c == "." || c == ".." || c.contains('/') || c.contains('\\') || c.contains('\0'))
 }
 
+/// SHA-1 of the bencoded `info` dictionary: the torrent's info hash (v1), as 40 lower-case hex digits.
+pub fn info_hash(bytes: &[u8]) -> Result<String, String> {
+    use sha1::{Digest, Sha1};
+    if bytes.len() > MAX_TORRENT_BYTES {
+        return Err("torrent file is too large".into());
+    }
+    if bytes.first() != Some(&b'd') {
+        return Err("not a torrent (no top-level dictionary)".into());
+    }
+    let mut pos = 1;
+    while bytes.get(pos).ok_or("unterminated torrent")? != &b'e' {
+        let Value::Bytes(key) = parse(bytes, &mut pos, 1)? else { return Err("dictionary key is not a string".into()) };
+        let start = pos;
+        parse(bytes, &mut pos, 1)?;
+        if key == b"info" {
+            let digest = Sha1::digest(&bytes[start..pos]);
+            return Ok(digest.iter().map(|b| format!("{b:02x}")).collect());
+        }
+    }
+    Err("torrent has no info dictionary".into())
+}
+
 pub fn read(bytes: &[u8]) -> Result<TorrentInfo, String> {
     if bytes.len() > MAX_TORRENT_BYTES {
         return Err("torrent file is too large".into());
@@ -172,6 +194,18 @@ mod tests {
         let t = format!("d4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
         let info = read(&t).unwrap();
         assert_eq!(info.files, vec![TorrentFile { path: "Visions.cbz".into(), size: 42 }]);
+    }
+
+    #[test]
+    fn info_hash_is_the_sha1_of_the_info_dictionary() {
+        let t = format!("d8:announce3:foo4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
+        // sha1(b"d6:lengthi42e4:name11:Visions.cbze"), computed independently with Python's hashlib
+        assert_eq!(info_hash(&t).unwrap(), "a51f3c07e7474f147484b1a0f11315d864331750");
+        // key order and extra keys around "info" do not matter
+        let t2 = format!("d4:infod6:lengthi42e4:name{}e7:comment1:xe", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
+        assert_eq!(info_hash(&t2).unwrap(), info_hash(&t).unwrap());
+        assert!(info_hash(b"d3:foo3:bare").is_err());
+        assert!(info_hash(b"garbage").is_err());
     }
 
     #[test]
