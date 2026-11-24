@@ -1,0 +1,25 @@
+[package]
+name = "manga-reader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-channel = "2.5.0"
+fast_image_resize = "6.2.0"
+gtk = { version = "0.11.5", package = "gtk4", features = ["v4_12"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+libc = "0.2.191"
+
+# Our own crate stays quick to rebuild; dependencies are always optimized
+# (image decoding and resizing are unusably slow at opt-level 0).
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "abort"
