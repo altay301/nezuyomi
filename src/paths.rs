@@ -19,6 +19,10 @@ pub fn data_dir() -> PathBuf {
     xdg("XDG_DATA_HOME", ".local/share").join(APP)
 }
 
+pub fn config_dir() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join(APP)
+}
+
 pub fn extensions_dir() -> PathBuf {
     data_dir().join("extensions")
 }

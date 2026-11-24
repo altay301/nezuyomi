@@ -1,0 +1,26 @@
+# Default rules for turning Nyaa release titles and archive file names into
+# series title + volume/chapter numbers. A user copy at
+# ~/.config/manga-reader/nyaa-rules.toml overrides any uploader table by name
+# (and [default]). Patterns use named groups: title, vol, vol_end, ch, ch_end.
+
+[default]
+# Only archives are wanted; EPUB, audio and PDF are skipped.
+accept_ext = ["cbz", "zip", "cbr", "rar", "7z"]
+# Releases that are not one series' volumes.
+# JPEG XL pages cannot be decoded by the reader; "app rip" releases are mass packs.
+reject_title = ['\[Audiobook\]', '(?i)chapter updates\s*-\s*week', '(?i)\b(epub|audiobook)\b', '(?i)jpe?g-?xl|\bjxl\b', '(?i)\bapp rip\b']
+# Tried in order, first match wins.
+patterns = [
+  # chapters compiled into volumes: "Series 001-021 as v01-05 (Digital-Compilation) ..."
+  '^(?P<title>.+?) (?P<ch>\d{1,4})-(?P<ch_end>\d{1,4}) as v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:\s|$)',
+  # volumes, optionally followed by loose chapters: "v01-13", "v01,009-090", "v05"
+  '^(?P<title>.+?) v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:,\s*(?P<ch>\d+)(?:-(?P<ch_end>\d+))?)?(?:\s|$)',
+  # no volume number at all: the whole run or a one-shot, "Series (2017-2026) (Digital) ..."
+  '^(?P<title>.+?) [\(\[]',
+]
+# When one release exists in several variants, which tag wins (substring, in order).
+prefer_variant = []
+
+[uploader.UploaderF]
+# UploaderF posts "(UploaderF-Empire)" and "(UploaderF-repack)" of the same release.
+prefer_variant = ["Empire", "repack"]

@@ -9,6 +9,7 @@ mod library;
 mod loader;
 mod local;
 mod net;
+mod nyaa;
 mod pages;
 mod player;
 mod paths;
@@ -20,6 +21,9 @@ mod strip;
 
 fn main() -> gtk::glib::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--nyaa-probe") {
+        std::process::exit(nyaa::probe(&args[1..]));
+    }
     if args.first().map(String::as_str) == Some("--probe-raw") {
         std::process::exit(probe::run_raw(&args[1..]));
     }
