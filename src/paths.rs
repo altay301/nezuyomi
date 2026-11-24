@@ -39,7 +39,7 @@ pub fn manga_root() -> PathBuf {
     home().join("Manga")
 }
 
-fn cache_dir() -> PathBuf {
+pub fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache").join(APP)
 }
 
@@ -53,25 +53,36 @@ pub fn cache_file(kind: &str, url: &str) -> PathBuf {
     cache_dir().join(kind).join(format!("{:016x}.{ext}", fnv1a(url)))
 }
 
-/// Deletes the oldest cached files until the cache fits [`CACHE_LIMIT_BYTES`].
+/// Deletes the oldest cached files until the cache fits [`CACHE_LIMIT_BYTES`]. Extracted
+/// archives (`archives/<id>/`) count and are removed as one unit.
 pub fn trim_cache() {
-    let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
+    let mut entries: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
     for kind in ["pages", "covers"] {
         if let Ok(rd) = std::fs::read_dir(cache_dir().join(kind)) {
             for e in rd.flatten() {
                 if let Ok(m) = e.metadata() {
-                    files.push((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len(), e.path()));
+                    entries.push((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len(), e.path()));
                 }
             }
         }
     }
-    let mut total: u64 = files.iter().map(|f| f.1).sum();
-    files.sort();
-    for (_, size, path) in files {
+    if let Ok(rd) = std::fs::read_dir(cache_dir().join("archives")) {
+        for e in rd.flatten() {
+            let dir = e.path();
+            let size: u64 = std::fs::read_dir(&dir).map(|d| d.flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0);
+            // The manifest is written last and touched whenever the volume is opened.
+            let used = std::fs::metadata(dir.join("pages.json")).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+            entries.push((used, size, dir));
+        }
+    }
+    let mut total: u64 = entries.iter().map(|f| f.1).sum();
+    entries.sort();
+    for (_, size, path) in entries {
         if total <= CACHE_LIMIT_BYTES {
             break;
         }
-        if std::fs::remove_file(path).is_ok() {
+        let removed = if path.is_dir() { std::fs::remove_dir_all(&path).is_ok() } else { std::fs::remove_file(&path).is_ok() };
+        if removed {
             total -= size;
         }
     }

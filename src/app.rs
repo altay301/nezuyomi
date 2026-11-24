@@ -50,7 +50,12 @@ pub fn background<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, 
 /// Local folders, bundled extensions and user extensions (which override bundled ones by id).
 fn load_sources() -> Vec<Arc<dyn Source>> {
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from).unwrap_or_else(paths::manga_root);
-    let mut sources: Vec<Arc<dyn Source>> = vec![Arc::new(LocalSource::new(root))];
+    // "Nyaa" (downloaded volumes) is its own source and tab; it is not a series of "Local".
+    let nyaa_root = root.join("Nyaa");
+    let mut sources: Vec<Arc<dyn Source>> = vec![
+        Arc::new(LocalSource::new("local", "Local", root, &["Nyaa"])),
+        Arc::new(LocalSource::new("nyaa", "Nyaa", nyaa_root, &[])),
+    ];
     let mut codes: Vec<String> = BUNDLED_EXTENSIONS.iter().map(|s| s.to_string()).collect();
     if let Ok(rd) = std::fs::read_dir(paths::extensions_dir()) {
         let mut files: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "js")).collect();

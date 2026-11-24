@@ -90,8 +90,9 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     entries
 }
 
-/// A folder with sub-folders is a series of chapters; a folder that directly
-/// contains images is a single chapter.
+/// A series folder: every sub-folder and every comic archive (CBZ/ZIP/CBR/RAR/7z) in it is a
+/// chapter, in natural name order. A folder that directly contains images is a single chapter.
+/// For an archive chapter `Chapter::dir` is the archive file itself.
 pub fn scan_series(root: &Path) -> Series {
     let name = root
         .file_name()
@@ -100,9 +101,13 @@ pub fn scan_series(root: &Path) -> Series {
     let entries = sorted_entries(root);
     let mut chapters: Vec<Chapter> = entries
         .iter()
-        .filter(|p| p.is_dir())
+        .filter(|p| p.is_dir() || (p.is_file() && crate::archive::is_archive(p)))
         .map(|p| Chapter {
-            name: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            name: if p.is_dir() {
+                p.file_name().unwrap_or_default().to_string_lossy().into_owned()
+            } else {
+                p.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+            },
             dir: p.clone(),
         })
         .collect();

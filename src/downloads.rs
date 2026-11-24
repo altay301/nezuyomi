@@ -33,10 +33,16 @@ pub enum Event {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ManifestPage {
-    file: String,
-    w: u32,
-    h: u32,
+pub struct ManifestPage {
+    pub file: String,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Writes `pages.json` next to the page files (shared by downloads and extracted archives).
+pub fn write_manifest(dir: &Path, pages: &[ManifestPage]) -> Result<(), String> {
+    let json = serde_json::to_vec(pages).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("pages.json"), json).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 struct Task {

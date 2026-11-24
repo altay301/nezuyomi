@@ -1,4 +1,5 @@
 mod app;
+mod archive;
 mod browse;
 mod covers;
 mod db;

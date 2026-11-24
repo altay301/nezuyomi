@@ -1,31 +1,45 @@
-//! `LocalSource`: series folders under a root directory (default `~/Manga`),
-//! each containing one sub-folder per chapter.
+//! `LocalSource`: series folders under a root directory (default `~/Manga`). A series folder
+//! holds one sub-folder per chapter, or comic archives (CBZ/ZIP/CBR/RAR/7z) as chapters,
+//! e.g. volumes downloaded from Nyaa.
 
 use std::path::{Path, PathBuf};
 
-use crate::library;
 use crate::source::{ChapterInfo, MangaDetails, MangaPage, MangaSummary, PageRef, Source, SourceResult};
+use crate::{archive, library};
 
 pub struct LocalSource {
+    id: &'static str,
+    name: &'static str,
     root: PathBuf,
+    /// Folder names under `root` that are not series (e.g. `Nyaa`, which has its own source).
+    hidden: &'static [&'static str],
 }
 
 impl LocalSource {
-    pub fn new(root: PathBuf) -> Self {
-        Self { root }
+    pub fn new(id: &'static str, name: &'static str, root: PathBuf, hidden: &'static [&'static str]) -> Self {
+        Self { id, name, root, hidden }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     fn series_dirs(&self) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = std::fs::read_dir(&self.root)
             .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect())
             .unwrap_or_default();
+        dirs.retain(|d| !self.hidden.contains(&name_of(d).as_str()));
         dirs.sort_by(|a, b| library::natural_cmp(&name_of(a), &name_of(b)));
         dirs
     }
 
-    fn first_image(dir: &Path) -> Option<String> {
+    /// First image of the first chapter (a file path), or the first page of the first archive.
+    fn cover_of(dir: &Path) -> Option<String> {
         let series = library::scan_series(dir);
         let chapter = series.chapters.first()?;
+        if chapter.dir.is_file() {
+            return archive::cover_of(&chapter.dir).map(|p| p.to_string_lossy().into_owned());
+        }
         library::list_images(&chapter.dir).into_iter().next().map(|p| p.to_string_lossy().into_owned())
     }
 
@@ -33,7 +47,7 @@ impl LocalSource {
         MangaPage {
             items: items
                 .into_iter()
-                .map(|d| MangaSummary { id: name_of(&d), title: name_of(&d), cover: Self::first_image(&d) })
+                .map(|d| MangaSummary { id: name_of(&d), title: name_of(&d), cover: Self::cover_of(&d) })
                 .collect(),
             has_next: false,
         }
@@ -44,12 +58,18 @@ fn name_of(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// "Series v02 (2026) (Digital) (Group)" -> "v02 (2026) (Digital) (Group)" for the chapter list.
+fn display_name(series: &str, chapter: &str) -> String {
+    let rest = chapter.strip_prefix(series).map(str::trim).filter(|r| !r.is_empty());
+    rest.unwrap_or(chapter).to_string()
+}
+
 impl Source for LocalSource {
     fn id(&self) -> &str {
-        "local"
+        self.id
     }
     fn name(&self) -> &str {
-        "Local"
+        self.name
     }
     fn popular(&self, page: u32) -> SourceResult<MangaPage> {
         Ok(if page > 1 { MangaPage::default() } else { self.page(self.series_dirs()) })
@@ -69,7 +89,7 @@ impl Source for LocalSource {
         }
         Ok(MangaDetails {
             title: id.to_string(),
-            cover: Self::first_image(&dir),
+            cover: Self::cover_of(&dir),
             description: Some(format!("Local folder {}", dir.display())),
             ..Default::default()
         })
@@ -82,21 +102,74 @@ impl Source for LocalSource {
             .enumerate()
             .map(|(i, c)| ChapterInfo {
                 id: format!("{manga_id}/{}", c.name),
-                name: c.name.clone(),
+                name: display_name(manga_id, &c.name),
                 number: Some((i + 1) as f64),
                 ..Default::default()
             })
             .collect())
     }
     fn pages(&self, chapter_id: &str) -> SourceResult<Vec<PageRef>> {
-        // Series folders that directly contain images are a single chapter named like the series.
-        let mut dir = self.root.join(chapter_id);
-        if !dir.is_dir() {
-            dir = self.root.join(chapter_id.split('/').next().unwrap_or_default());
-        }
-        Ok(library::read_pages(&dir)
+        let (series, chapter) = chapter_id.split_once('/').unwrap_or((chapter_id, chapter_id));
+        let found = library::scan_series(&self.root.join(series)).chapters.into_iter().find(|c| c.name == chapter);
+        let pages = match found {
+            Some(c) if c.dir.is_file() => archive::pages(&c.dir)?,
+            Some(c) => library::read_pages(&c.dir),
+            None => return Err(format!("{chapter_id} was not found on disk")),
+        };
+        Ok(pages
             .into_iter()
             .map(|p| PageRef { url: p.path.to_string_lossy().into_owned(), width: p.width, height: p.height, ..Default::default() })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        image::DynamicImage::new_rgb8(w, h).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        out
+    }
+
+    fn make_zip(path: &Path, entries: &[(&str, Vec<u8>)]) {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, data) in entries {
+            z.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(data).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn archives_are_chapters_next_to_folders_and_hidden_dirs_are_not_series() {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("manga-reader-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let series = root.join("Teppeki Honeymoon");
+        std::fs::create_dir_all(&series).unwrap();
+        std::fs::create_dir_all(root.join("Nyaa").join("Other")).unwrap();
+        make_zip(&series.join("Teppeki Honeymoon v02 (2026) (Digital).cbz"), &[("1.png", png(6, 9)), ("2.png", png(6, 9))]);
+        make_zip(&series.join("Teppeki Honeymoon v01 (2025) (Digital).cbz"), &[("a.png", png(4, 4))]);
+        std::fs::write(series.join("notes.txt"), "x").unwrap();
+        // SAFETY: serialized by LOCK with the other test that sets the cache location.
+        unsafe { std::env::set_var("XDG_CACHE_HOME", root.join("cache")) };
+
+        let src = LocalSource::new("local", "Local", root.clone(), &["Nyaa", "cache"]);
+        let listed = src.popular(1).unwrap().items;
+        assert_eq!(listed.iter().map(|m| m.title.as_str()).collect::<Vec<_>>(), vec!["Teppeki Honeymoon"], "Nyaa and the cache folder are not series");
+        assert!(listed[0].cover.is_some(), "cover comes from the first volume");
+
+        let ch = src.chapters("Teppeki Honeymoon").unwrap();
+        assert_eq!(ch.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["v01 (2025) (Digital)", "v02 (2026) (Digital)"]);
+        let pages = src.pages(&ch[1].id).unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!((pages[0].width, pages[0].height), (6, 9));
+        assert!(Path::new(&pages[0].url).exists());
+        assert!(src.pages("Teppeki Honeymoon/nope").is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
