@@ -228,6 +228,9 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     });
 
     app.show_library();
+    if let Ok(spec) = std::env::var("MANGA_SCREENSHOT") {
+        schedule_screenshots(&window, &spec);
+    }
     if let Ok(spec) = std::env::var("MANGA_OPEN") {
         app.auto_open(&spec);
     }
@@ -318,6 +321,29 @@ impl App {
     }
 }
 
+/// Dev hook: `MANGA_SCREENSHOT=<file.png>@<seconds>[,<file.png>@<seconds>…]` renders
+/// this app's own window to PNG (never touches other windows on the desktop).
+fn schedule_screenshots(window: &gtk::ApplicationWindow, spec: &str) {
+    for item in spec.split(',') {
+        let Some((path, secs)) = item.rsplit_once('@') else { continue };
+        let (Ok(secs), path) = (secs.parse::<f64>(), path.to_string()) else { continue };
+        let window = window.clone();
+        glib::timeout_add_local_once(Duration::from_secs_f64(secs), move || {
+            let paintable = gtk::WidgetPaintable::new(Some(&window));
+            let snapshot = gtk::Snapshot::new();
+            paintable.snapshot(&snapshot, window.width() as f64, window.height() as f64);
+            let renderer = gtk::prelude::NativeExt::renderer(&window);
+            match (snapshot.to_node(), renderer) {
+                (Some(node), Some(r)) => match r.render_texture(&node, None).save_to_png(&path) {
+                    Ok(()) => eprintln!("[screenshot] {path}"),
+                    Err(e) => eprintln!("[screenshot] {path}: {e}"),
+                },
+                _ => eprintln!("[screenshot] nothing to render"),
+            }
+        });
+    }
+}
+
 fn load_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_string(include_str!("theme.css"));
@@ -397,18 +423,18 @@ fn start_autotest(strip: &crate::strip::StripView, window: &gtk::ApplicationWind
             a.set_value(v.clamp(0.0, max.max(0.0)));
         }
         if zooming {
-            // 8 s cycle: 1x, ramp to 2x, hold, ramp back.
-            let phase = elapsed % 8.0;
-            let target = match phase {
-                p if p < 2.0 => 1.0,
-                p if p < 3.0 => 1.0 + (p - 2.0),
-                p if p < 5.0 => 2.0,
-                p if p < 6.0 => 2.0 - (p - 5.0),
-                _ => 1.0,
-            };
+            // 12 s cycle: 1x, zoom in to 2x, back to 1x, zoom out to 0.5x, back to 1x.
+            const KEYS: [(f64, f64); 9] = [
+                (0.0, 1.0), (1.5, 1.0), (2.5, 2.0), (4.0, 2.0), (5.0, 1.0),
+                (6.0, 1.0), (7.0, 0.5), (9.0, 0.5), (10.0, 1.0),
+            ];
+            let phase = elapsed % 12.0;
+            let target = KEYS.windows(2).find(|k| phase < k[1].0).map_or(1.0, |k| {
+                let f = (phase - k[0].0) / (k[1].0 - k[0].0);
+                k[0].1 + (k[1].1 - k[0].1) * f
+            });
             let (w, h) = (strip.width() as f64, strip.height() as f64);
-            let ramping = (2.0..3.0).contains(&phase) || (5.0..6.0).contains(&phase);
-            if ramping || (strip.zoom() - target).abs() > 1e-3 {
+            if (strip.zoom() - target).abs() > 1e-3 {
                 strip.zoom_to(target, w / 2.0, h / 2.0);
                 settled.set(false);
             } else if !settled.replace(true) {

@@ -78,7 +78,7 @@ Goal: every frame ≤ 16.6 ms on a 60 Hz display; main-thread work per frame ≤
 
 **Pinch zoom:**
 - Two fingers via `GtkGestureZoom`; during the gesture zoom is **only a GPU transform** (`snapshot` scale + translate), no relayout or re-decode
-- Zoom is centered between the two fingers; range 1×–3×
+- Zoom is centered between the two fingers; range 0.5×–3×. Below 1× the page is narrower than the screen and centred (plain linear filtering: trilinear cost ~20 % more slow frames); pinching within ±8 % of 1× snaps to exactly 1× (page fills the screen width) so the exact fit is easy to hit from either side
 - While zoomed, one finger pans in any direction (horizontal scrolling enabled)
 - When the gesture ends (above 1×), visible tiles are re-decoded at higher resolution in the background and swapped in silently → sharp image, no stutter
 - Texture filtering: linear (mipmapped when downscaling) for a smooth image

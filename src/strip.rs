@@ -40,6 +40,11 @@ const KEEP_SCREENS: f64 = 5.0;
 /// High-resolution (zoomed) tiles only within this distance.
 const NEAR_SCREENS: f64 = 1.0;
 const MAX_ZOOM: f64 = 3.0;
+/// Below 1x the page is narrower than the screen and centred.
+const MIN_ZOOM: f64 = 0.5;
+/// Pinching inside this band locks to exactly 1x (page fills the screen width),
+/// so that exact fit is easy to hit from either side.
+const SNAP_BAND: std::ops::RangeInclusive<f64> = 0.92..=1.08;
 /// Extra rows (device pixels) rendered below every tile, see `refresh`.
 const OVERLAP_PX: f64 = 1.0;
 const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
@@ -114,6 +119,18 @@ struct State {
     /// (request range, near range, wanted quality) of the last refresh.
     last_key: Option<((usize, usize), (usize, usize), u8)>,
     keep: (usize, usize),
+}
+
+/// Limits a requested zoom to the supported range and snaps the band around 1x to exactly 1x.
+fn clamp_zoom(requested: f64) -> f64 {
+    let z = requested.clamp(MIN_ZOOM, MAX_ZOOM);
+    if SNAP_BAND.contains(&z) { 1.0 } else { z }
+}
+
+/// Left edge of the content on screen: centred when narrower than the
+/// viewport, otherwise shifted by the horizontal scroll offset.
+fn content_origin_x(content_w: f64, viewport_w: f64, hscroll: f64) -> f64 {
+    if content_w < viewport_w { (viewport_w - content_w) / 2.0 } else { -hscroll }
 }
 
 mod imp {
@@ -242,8 +259,13 @@ mod imp {
             // Visible tiles. Edges are rounded to device pixels so that
             //    neighbouring tiles never leave a seam.
             let px = |v: f64| ((v * scale).round() / scale) as f32;
-            let x0 = px(-hv);
-            let x1 = px(st.layout.width * z - hv);
+            let content_w = st.layout.width * z;
+            let origin = content_origin_x(content_w, w as f64, hv);
+            let x0 = px(origin);
+            let x1 = px(origin + content_w);
+            // Linear filtering also when shrunk: mipmapped (trilinear) filtering looked
+            // marginally smoother but cost ~20 % more slow frames on the UHD 620.
+            let filter = gsk::ScalingFilter::Linear;
             // A tile's bottom edge is the *same value* as the next tile's top
             // edge; computing both separately could round them differently and
             // leave a one-pixel gap.
@@ -264,7 +286,7 @@ mod imp {
                 let overlap = (OVERLAP_PX * z / scale) as f32;
                 snapshot.append_scaled_texture(
                     &tex.texture,
-                    gsk::ScalingFilter::Linear,
+                    filter,
                     &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0 + overlap),
                 );
             }
@@ -495,15 +517,16 @@ mod imp {
 
         pub fn apply_zoom(&self, new_zoom: f64, fx: f64, fy: f64) {
             let old = self.zoom.get();
-            let mut z = new_zoom.clamp(1.0, MAX_ZOOM);
-            if z < 1.03 {
-                z = 1.0;
-            }
+            let z = clamp_zoom(new_zoom);
             if (z - old).abs() < 1e-4 {
                 return;
             }
             let (hv, vv) = self.offsets();
-            let (cx, cy) = ((hv + fx) / old, (vv + fy) / old);
+            let (w, width) = (self.obj().width() as f64, self.state.borrow().layout.width);
+            // The content point under the fingers must stay under them. While the
+            // page is narrower than the screen it is centred, not scrolled.
+            let cx = (fx - content_origin_x(width * old, w, hv)) / old;
+            let cy = (vv + fy) / old;
             self.zoom.set(z);
             self.configure_adjustments(Some((cx * z - fx, cy * z - fy)));
             self.obj().queue_draw();
@@ -764,5 +787,28 @@ impl StripView {
             }
         ));
         self.add_controller(click);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_snaps_to_full_width_and_stays_in_range() {
+        for z in [0.92, 0.95, 1.0, 1.05, 1.08] {
+            assert_eq!(clamp_zoom(z), 1.0, "{z} should snap to 1x");
+        }
+        assert_eq!(clamp_zoom(0.91), 0.91);
+        assert_eq!(clamp_zoom(1.09), 1.09);
+        assert_eq!(clamp_zoom(0.1), MIN_ZOOM);
+        assert_eq!(clamp_zoom(9.0), MAX_ZOOM);
+    }
+
+    #[test]
+    fn narrow_content_is_centred_wide_content_scrolls() {
+        assert_eq!(content_origin_x(500.0, 1000.0, 0.0), 250.0);
+        assert_eq!(content_origin_x(2000.0, 1000.0, 300.0), -300.0);
+        assert_eq!(content_origin_x(1000.0, 1000.0, 0.0), 0.0);
     }
 }
