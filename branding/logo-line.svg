@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Manga Reader logo — line art</title>
+  <!-- nose: snout tip up to the first whisker, filled black -->
+  <clipPath id="snout">
+    <path d="M170 345 Q335 240 515 135 L540 297 C420 332 260 372 170 345 Z"/>
+  </clipPath>
+  <polygon points="0,0 25,0 362,600 0,600" fill="#1a1a2e" clip-path="url(#snout)"/>
+  <g fill="none" stroke="#1a1a2e" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <!-- tail, starts where the ear ends -->
+    <path d="M645 212 C705 100 790 62 830 62 C930 70 955 300 958 425"/>
+    <!-- head top + ear -->
+    <path d="M170 345 Q335 240 515 135 C537 5 607 -5 645 212"/>
+    <!-- chin -->
+    <path d="M170 345 C260 372 420 332 540 297"/>
+    <!-- body front -->
+    <path d="M540 297 C300 392 82 502 78 690 C80 800 220 860 345 858 C520 855 640 760 655 650"/>
+    <!-- back -->
+    <path d="M655 650 C665 560 635 470 640 360 C642 290 642 240 645 212"/>
+    <!-- eye: short stroke at the sketch's angle -->
+    <path d="M463 200 L520 206"/>
+    <!-- whiskers -->
+    <path d="M150 222 L268 432"/>
+    <path d="M212 202 L320 398"/>
+    <!-- arm -->
+    <path d="M487 447 C465 522 455 602 443 692"/>
+    <!-- belly -->
+    <path fill="#D1564D" d="M358 588 L505 600 L478 738 L328 713 Z"/>
+    <!-- foot -->
+    <path d="M52 848 L345 857"/>
+  </g>
+</svg>

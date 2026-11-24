@@ -2,3 +2,4 @@
 *.rpm
 .vscode/
 /C
+/branding/preview.html

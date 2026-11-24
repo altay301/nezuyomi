@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Manga Reader logo — retro tile</title>
+  <!-- platinum beveled tile -->
+  <rect x="64" y="64" width="896" height="896" fill="#DDDDDD"/>
+  <path d="M64 64 H960 L932 92 H92 V932 L64 960 Z" fill="#FFFFFF"/>
+  <path d="M960 960 H64 L92 932 H932 V92 L960 64 Z" fill="#888888"/>
+  <rect x="64" y="64" width="896" height="896" fill="none" stroke="#1a1a2e" stroke-width="12"/>
+  <!-- lavender inset -->
+  <rect x="132" y="132" width="760" height="760" fill="#CCCCFF" stroke="#888888" stroke-width="8"/>
+
+  <g transform="translate(108 164) scale(0.8)" stroke="#1a1a2e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- tail, starts where the ear ends -->
+    <path d="M645 212 C705 100 790 62 830 62 C930 70 955 300 958 425" fill="none"/>
+    <!-- body fill -->
+    <clipPath id="snout">
+      <path d="M170 345 Q335 240 515 135 L540 297 C420 332 260 372 170 345 Z"/>
+    </clipPath>
+    <path fill="#DDDDDD" stroke="none" d="M170 345 Q335 240 515 135 C537 5 607 -5 645 212
+             C642 240 642 290 640 360 C635 470 665 560 655 650
+             C640 760 520 855 345 858 C220 860 80 800 78 690
+             C82 502 300 392 540 297 C420 332 260 372 170 345 Z"/>
+    <!-- nose: snout tip up to the first whisker, filled black -->
+    <polygon points="0,0 25,0 362,600 0,600" fill="#1a1a2e" stroke="none" clip-path="url(#snout)"/>
+    <!-- body outline -->
+    <g fill="none">
+      <path d="M170 345 Q335 240 515 135 C537 5 607 -5 645 212"/>
+      <path d="M170 345 C260 372 420 332 540 297"/>
+      <path d="M540 297 C300 392 82 502 78 690 C80 800 220 860 345 858 C520 855 640 760 655 650"/>
+      <path d="M655 650 C665 560 635 470 640 360 C642 290 642 240 645 212"/>
+    </g>
+    <!-- belly -->
+    <path d="M358 588 L505 600 L478 738 L328 713 Z" fill="#D1564D"/>
+    <!-- arm -->
+    <path d="M487 447 C465 522 455 602 443 692" fill="none"/>
+    <!-- whiskers -->
+    <path d="M150 222 L268 432 M212 202 L320 398" fill="none"/>
+    <!-- foot -->
+    <path d="M52 848 L345 857" fill="none"/>
+    <!-- eye: short stroke at the sketch's angle -->
+    <path d="M463 200 L520 206" fill="none"/>
+  </g>
+</svg>

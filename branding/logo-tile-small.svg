@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Manga Reader logo — retro tile, small sizes (16–48 px)</title>
+  <!-- Small sizes show only the book from the main logo, enlarged, on the same tile. -->
+  <!-- platinum beveled tile -->
+  <rect x="32" y="32" width="960" height="960" fill="#DDDDDD"/>
+  <path d="M32 32 H992 L952 72 H72 V952 L32 992 Z" fill="#FFFFFF"/>
+  <path d="M992 992 H32 L72 952 H952 V72 L992 32 Z" fill="#888888"/>
+  <rect x="32" y="32" width="960" height="960" fill="none" stroke="#1a1a2e" stroke-width="32"/>
+  <!-- lavender inset -->
+  <rect x="100" y="100" width="824" height="824" fill="#CCCCFF"/>
+
+  <!-- book: same shape and tilt as in logo-tile.svg, scaled up and centered -->
+  <path transform="translate(512 512) scale(3.6) translate(-416.5 -663)"
+        d="M358 588 L505 600 L478 738 L328 713 Z"
+        fill="#D1564D" stroke="#1a1a2e" stroke-width="15" stroke-linejoin="round"/>
+</svg>
