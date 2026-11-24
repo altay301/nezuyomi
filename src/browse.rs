@@ -146,6 +146,10 @@ impl BrowseView {
         this
     }
 
+    pub fn set_placeholder(&self, text: &str) {
+        self.search.set_placeholder_text(Some(text));
+    }
+
     pub fn set_on_open(&self, f: impl Fn(Arc<dyn Source>, MangaSummary) + 'static) {
         *self.on_open.borrow_mut() = Some(Rc::new(f));
     }

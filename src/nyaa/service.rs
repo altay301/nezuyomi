@@ -25,6 +25,8 @@ pub enum Event {
     Qbit(Result<String, String>),
     /// Data in the database changed; lists should reload.
     Changed,
+    /// Result of a search across the followed uploaders: how many releases were new.
+    Searched(Result<usize, String>),
     /// Whether any of our torrents is still downloading (the UI polls only then).
     Active(bool),
 }
@@ -125,6 +127,20 @@ impl Service {
             let _ = s.events.send_blocking(Event::Active(s.has_active_downloads()));
             let _ = s.events.send_blocking(Event::Changed);
         });
+    }
+
+    /// Searches the followed uploaders' feeds for a phrase (RSS only).
+    pub fn search(self: &Arc<Self>, query: String) {
+        self.spawn("search", move |s| {
+            let result = s.with_ctx(|ctx| sync::search_feeds(ctx, &query));
+            let _ = s.events.send_blocking(Event::Searched(result));
+            let _ = s.events.send_blocking(Event::Changed);
+        });
+    }
+
+    /// The series title of a release title (for pre-filling the link window).
+    pub fn series_title_of(&self, uploader: &str, release_title: &str) -> Option<String> {
+        self.rules.parse(uploader, release_title).ok().map(|p| p.title)
     }
 
     pub fn test_connection(self: &Arc<Self>) {

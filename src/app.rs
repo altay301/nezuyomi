@@ -285,6 +285,10 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
             }
         }
     });
+    nyaa_page.set_on_link_release({
+        let a = app.clone();
+        move |release| a.link_release(release)
+    });
     details.set_on_nyaa_link({
         let a = app.clone();
         move |source, manga| a.open_link_dialog(source, manga)
@@ -377,6 +381,14 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
                         (_, Ok(_)) => continue, // nothing paused or resumed: keep the loop running
                         (_, Err(e)) => format!("Nyaa power policy: {e}"),
                     }),
+                    NyaaEvent::Searched(r) => {
+                        a.nyaa.clear_banner();
+                        a.status.set_text(&match r {
+                        Ok(0) => "Nyaa search: nothing new (see the list below)".to_string(),
+                        Ok(n) => format!("Nyaa search: {n} new releases found"),
+                        Err(e) => format!("Nyaa search: {e}"),
+                        });
+                    }
                     NyaaEvent::Qbit(r) => a.nyaa.show_connection_result(&r),
                     NyaaEvent::Changed => a.nyaa.refresh(),
                     NyaaEvent::Active(v) => active.set(v),
@@ -517,6 +529,17 @@ impl App {
         );
     }
 
+    /// "Link & download…" on a release from a search: links the Nyaa series itself (title from the
+    /// release name) to that uploader, then the next cycle queues everything the link matches.
+    fn link_release(self: &Rc<Self>, release: crate::nyaa::store::Release) {
+        let title = self.nyaa_service.series_title_of(&release.uploader, &release.title).unwrap_or_else(|| release.title.clone());
+        let (svc, id) = (self.nyaa_service.clone(), crate::nyaa::sync::sanitize_folder(&title));
+        let (uploader, shown) = (release.uploader.clone(), title.clone());
+        nyaa_ui::show_link_dialog(self.window.upcast_ref(), vec![uploader], &shown, move |uploader, phrase, auto| {
+            svc.link("nyaa".into(), id.clone(), title.clone(), uploader, phrase, auto);
+        });
+    }
+
     /// "Volumes on disk": the downloaded series in the Nyaa place.
     fn open_nyaa_series(&self, folder: String) {
         if let Some(src) = self.sources.iter().find(|s| s.id() == "nyaa").cloned() {
@@ -600,7 +623,11 @@ impl App {
         if kind == "nyaa" {
             // MANGA_VIEW=nyaa:<series|releases|links|settings>
             self.nyaa_btn.set_active(true);
-            self.nyaa.select_tab(if sid.is_empty() { "series" } else { sid });
+            // MANGA_VIEW=nyaa:releases:<phrase> also runs that search.
+            match it.next() {
+                Some(phrase) if sid == "releases" => self.nyaa.search_for(phrase),
+                _ => self.nyaa.select_tab(if sid.is_empty() { "series" } else { sid }),
+            }
             return;
         }
         let Some((btn, source)) = buttons.iter().find(|(_, s)| s.id() == sid) else { return };

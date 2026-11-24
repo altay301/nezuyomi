@@ -433,6 +433,35 @@ pub fn link_series(ctx: &Ctx, source: &str, manga_id: &str, title: &str, uploade
     Ok(link)
 }
 
+/// Searches the followed uploaders' feeds for a phrase (`u=<uploader>&q=<phrase>`, RSS only) and
+/// stores what it finds like any other release. Returns how many releases are new.
+pub fn search_feeds(ctx: &Ctx, query: &str) -> Result<usize, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("type something to search for".into());
+    }
+    let (mut new, mut errors, mut asked) = (0, Vec::new(), 0);
+    for up in ctx.db.nyaa_uploaders().into_iter().filter(|u| u.enabled) {
+        if asked > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(if cfg!(test) { 0 } else { 2000 })); // be polite to Nyaa
+        }
+        asked += 1;
+        match ctx.fetcher.feed(&up.name, &ctx.settings.category, Some(query), None) {
+            Ok(Fetched::Items(items)) => new += ingest(ctx, &up.name, &items),
+            Ok(Fetched::NotModified) => {}
+            Err(e) => errors.push(format!("{}: {e}", up.name)),
+        }
+    }
+    match_pending(ctx);
+    if asked == 0 {
+        return Err("no followed uploaders are enabled (Nyaa → Settings)".into());
+    }
+    if new == 0 && !errors.is_empty() {
+        return Err(errors.join("; "));
+    }
+    Ok(new)
+}
+
 /// For the "Check now" button: unix time of the last cycle is kept per uploader; this is for logs.
 pub fn timestamp() -> i64 {
     now()
@@ -593,6 +622,29 @@ mod tests {
         run_cycle(&ctx, true);
         let err = queue_release(&ctx, &hash, false).unwrap_err();
         assert!(err.contains("differs"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn searching_feeds_stores_results_and_reports_new_ones() {
+        let dir = temp_dir("search");
+        let db = Db::open(&dir.join("db.sqlite")).unwrap();
+        let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();
+        let st = settings(&dir.join("Nyaa"), 1);
+        let fake = Fake::default();
+        fake.publish("UploaderB", "Boruto - Two Blue Vortex v06 (2026) (Digital) (UploaderB)", make_torrent("Boruto", &[("Boruto - Two Blue Vortex v06 (2026) (Digital) (UploaderB).cbz", 10)]), 10);
+        let qb = Client::new(1, None, None);
+        let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
+        db.nyaa_seed_uploaders(&super::super::DEFAULT_UPLOADERS);
+        assert!(search_feeds(&ctx, "  ").is_err());
+        assert_eq!(search_feeds(&ctx, "boruto").unwrap(), 1);
+        assert_eq!(search_feeds(&ctx, "boruto").unwrap(), 0, "the same results are not new twice");
+        assert_eq!(db.nyaa_recent_releases(10).len(), 1);
+        for u in db.nyaa_uploaders() {
+            db.nyaa_set_uploader_enabled(&u.name, false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(search_feeds(&ctx, "boruto").is_err(), "nothing enabled is explained, not silent");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

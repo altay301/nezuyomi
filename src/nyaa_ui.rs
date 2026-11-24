@@ -15,6 +15,7 @@ use crate::db::Db;
 use crate::nyaa::service::Service;
 use crate::nyaa::store::{self, Link, Release};
 use crate::nyaa::sync::{Report, Settings};
+use crate::nyaa::rules::normalize;
 use crate::nyaa::{qbit, secret, DEFAULT_UPLOADERS};
 use crate::source::Source;
 
@@ -64,6 +65,8 @@ pub struct NyaaPage {
     tab: RefCell<String>,
     releases: gtk::ListBox,
     show_skipped: gtk::CheckButton,
+    search: gtk::SearchEntry,
+    on_link_release: RefCell<Option<Rc<dyn Fn(Release)>>>,
     links: gtk::ListBox,
     uploaders: gtk::ListBox,
     new_uploader: gtk::Entry,
@@ -113,7 +116,9 @@ impl NyaaPage {
         let releases = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["nyaa-list"]).build();
         let show_skipped = gtk::CheckButton::builder().label("Show skipped").build();
         let check_now = button("Check now");
+        let search = gtk::SearchEntry::builder().css_classes(["retro"]).hexpand(true).placeholder_text("Filter releases; press Enter to search Nyaa for it").build();
         let rel_bar = gtk::Box::builder().spacing(8).css_classes(["retro-toolbar"]).build();
+        rel_bar.append(&search);
         rel_bar.append(&check_now);
         rel_bar.append(&show_skipped);
         let rel_scroll = gtk::ScrolledWindow::builder().child(&releases).vexpand(true).css_classes(["retro-well"]).build();
@@ -198,6 +203,8 @@ impl NyaaPage {
             tab: RefCell::new("series".into()),
             releases,
             show_skipped,
+            search: search.clone(),
+            on_link_release: RefCell::new(None),
             links,
             uploaders,
             new_uploader,
@@ -248,6 +255,27 @@ impl NyaaPage {
                 t.refresh_uploaders();
             }
         }));
+        // Typing filters what is already stored; Enter also asks Nyaa (the followed uploaders' feeds).
+        search.connect_search_changed({
+            let w = Rc::downgrade(&this);
+            move |_| {
+                if let Some(t) = w.upgrade() {
+                    t.refresh_releases()
+                }
+            }
+        });
+        search.connect_activate({
+            let w = Rc::downgrade(&this);
+            move |e| {
+                if let Some(t) = w.upgrade() {
+                    let q = e.text().trim().to_string();
+                    if !q.is_empty() {
+                        t.set_banner(&format!("Searching Nyaa for \"{q}\"…"), false);
+                        t.service.search(q);
+                    }
+                }
+            }
+        });
         this.show_skipped.connect_toggled({
             let w = Rc::downgrade(&this);
             move |_| {
@@ -259,9 +287,22 @@ impl NyaaPage {
         this
     }
 
+    pub fn set_on_link_release(&self, f: impl Fn(Release) + 'static) {
+        *self.on_link_release.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// Types a phrase into the Releases search and runs it (`MANGA_VIEW=nyaa:releases:<phrase>` test hook).
+    pub fn search_for(self: &Rc<Self>, phrase: &str) {
+        self.select_tab("releases");
+        self.search.set_text(phrase);
+        self.search.emit_activate();
+    }
+
     /// Called when the place is opened.
     pub fn show(self: &Rc<Self>) {
         self.series.show_source(self.nyaa_source.clone());
+        // This grid lists what is already on disk; say so (it is not a search of the site).
+        self.series.set_placeholder("Search downloaded series");
         self.refresh();
     }
 
@@ -297,6 +338,10 @@ impl NyaaPage {
         }
     }
 
+    pub fn clear_banner(&self) {
+        self.banner_box.set_visible(false);
+    }
+
     pub fn set_banner(&self, text: &str, error: bool) {
         self.banner.set_text(text);
         if error {
@@ -325,12 +370,21 @@ impl NyaaPage {
     // ---- releases --------------------------------------------------------------------------------
 
     fn refresh_releases(self: &Rc<Self>) {
-        let (db, this, all) = (self.db.clone(), self.clone(), self.show_skipped.is_active());
-        background(move || db.nyaa_recent_releases(300), move |rels: Vec<Release>| {
+        let query = normalize(self.search.text().as_str());
+        let searching = !query.is_empty();
+        // A search looks through everything stored, skipped ones included.
+        let (db, this, all) = (self.db.clone(), self.clone(), self.show_skipped.is_active() || searching);
+        background(move || db.nyaa_recent_releases(if searching { 3000 } else { 300 }), move |rels: Vec<Release>| {
             clear(&this.releases);
-            let shown: Vec<&Release> = rels.iter().filter(|r| all || (r.state != store::SKIPPED && r.state != store::UNPARSED)).collect();
+            let shown: Vec<&Release> = rels
+                .iter()
+                .filter(|r| all || (r.state != store::SKIPPED && r.state != store::UNPARSED))
+                .filter(|r| !searching || format!(" {} {} ", normalize(&r.title), normalize(&r.uploader)).contains(&query))
+                .take(300)
+                .collect();
             if shown.is_empty() {
-                this.releases.append(&label("Nothing here yet. Press \"Check now\".", "retro-text"));
+                let msg = if searching { "No stored release matches. Press Enter to search Nyaa for it." } else { "Nothing here yet. Press \"Check now\"." };
+                this.releases.append(&label(msg, "retro-text"));
             }
             for r in shown {
                 this.releases.append(&this.release_row(r));
@@ -350,6 +404,19 @@ impl NyaaPage {
         let row = gtk::Box::builder().spacing(8).css_classes(["chapter-row"]).build();
         row.append(&text);
         let actionable = r.link_id.is_some() && [store::MATCHED, store::CONFIRM, store::FAILED].contains(&r.state.as_str());
+        if !actionable && r.link_id.is_none() && r.state == store::SEEN {
+            // Not linked to any series yet: one step to link it and download what it adds.
+            let b = button("Link & download…");
+            let (rel, w) = (r.clone(), Rc::downgrade(self));
+            b.connect_clicked(move |_| {
+                if let Some(t) = w.upgrade() {
+                    if let Some(f) = t.on_link_release.borrow().clone() {
+                        f(rel.clone())
+                    }
+                }
+            });
+            row.append(&b);
+        }
         if actionable {
             let b = button("Download");
             let (rel, w) = (r.clone(), Rc::downgrade(self));
