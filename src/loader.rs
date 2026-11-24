@@ -237,3 +237,35 @@ fn render_tile(resizer: &mut Resizer, img: &RgbaImage, t: &TileJob) -> Option<Ve
     resizer.resize(&src, &mut dst, &options).ok()?;
     Some(dst.into_vec())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A uniformly white page must stay uniformly white in every tile, including
+    /// the first and last rows (no darkening at tile edges).
+    #[test]
+    fn white_page_stays_white_at_tile_edges() {
+        let img = RgbaImage::from_pixel(800, 6000, image::Rgba([255, 255, 255, 255]));
+        let mut resizer = Resizer::new();
+        // 800 -> 2560 wide upscaling and 800 -> 700 downscaling, fractional crops.
+        for (out_w, tile_h) in [(2560u32, 500u32), (700, 500), (1000, 333)] {
+            let scale = out_w as f64 / 800.0;
+            let src_h = tile_h as f64 / scale;
+            for i in 0..5 {
+                let t = TileJob { tile: i, src_top: i as f64 * src_h, src_h, out_w, out_h: tile_h };
+                let px = render_tile(&mut resizer, &img, &t).unwrap();
+                let (mut min, mut at) = (255u8, 0usize);
+                for (idx, c) in px.chunks(4).enumerate() {
+                    for &v in &c[..3] {
+                        if v < min {
+                            min = v;
+                            at = idx;
+                        }
+                    }
+                }
+                assert_eq!(min, 255, "w={out_w} tile {i}: darkest value {min} at row {}", at / out_w as usize);
+            }
+        }
+    }
+}

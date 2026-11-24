@@ -40,6 +40,8 @@ const KEEP_SCREENS: f64 = 5.0;
 /// High-resolution (zoomed) tiles only within this distance.
 const NEAR_SCREENS: f64 = 1.0;
 const MAX_ZOOM: f64 = 3.0;
+/// Extra rows (device pixels) rendered below every tile, see `refresh`.
+const OVERLAP_PX: f64 = 1.0;
 const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
 const WORKER_THREADS: usize = 2;
 
@@ -246,17 +248,24 @@ mod imp {
             // edge; computing both separately could round them differently and
             // leave a one-pixel gap.
             let n = st.layout.tiles.len();
+            // `i == n` is the bottom edge of the last tile.
             let top_edge = |i: usize| -> f32 {
-                let t = &st.layout.tiles[i];
-                if i < n { px(t.y * z - vv) } else { px((st.layout.tiles[n - 1].y + st.layout.tiles[n - 1].h) * z - vv) }
+                if i < n {
+                    px(st.layout.tiles[i].y * z - vv)
+                } else {
+                    let last = &st.layout.tiles[n - 1];
+                    px((last.y + last.h) * z - vv)
+                }
             };
             for i in first..last {
                 let Some(tex) = &st.tex[i] else { continue };
                 let (y0, y1) = (top_edge(i), top_edge(i + 1));
+                // The texture carries OVERLAP_PX extra rows (1:1 at zoom 1).
+                let overlap = (OVERLAP_PX * z / scale) as f32;
                 snapshot.append_scaled_texture(
                     &tex.texture,
                     gsk::ScalingFilter::Linear,
-                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0),
+                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0 + overlap),
                 );
             }
             drop(st);
@@ -415,12 +424,16 @@ mod imp {
                 }
                 let t = &st.layout.tiles[i];
                 let dist = (t.y + t.h / 2.0 - centre).abs();
+                // One extra device pixel of real content below the tile: it is drawn
+                // under the next tile's first row, so the renderer's edge rounding
+                // can never expose the black background between tiles.
+                let dev_h = (t.h * scale).round().max(1.0);
                 let job = TileJob {
                     tile: i,
                     src_top: t.src_top,
-                    src_h: t.src_h,
+                    src_h: t.src_h * (dev_h + OVERLAP_PX) / dev_h,
                     out_w: (width * scale * need as f64).round() as u32,
-                    out_h: (t.h * scale * need as f64).round().max(1.0) as u32,
+                    out_h: ((dev_h + OVERLAP_PX) * need as f64).round() as u32,
                 };
                 let e = groups.entry((t.page, need)).or_insert((f64::MAX, Vec::new()));
                 e.0 = e.0.min(dist);
