@@ -65,7 +65,7 @@ Goal: every frame ≤ 16.6 ms on a 60 Hz display; main-thread work per frame ≤
 | Cause | Fix |
 |---|---|
 | Image decoding on the main thread | Decoding/resizing only on background threads; results reach the main thread through a `glib` channel |
-| Uploading large textures to the GPU causes hitches | Strips are split into ~1500 px tiles (≤ ~6 MB each); tiles become textures 2–3 screens before they come into view |
+| Uploading large textures to the GPU causes hitches | Strips are split into ~500 px tiles (~3 MB each; measured, see Phase 0 findings); tiles become textures 3 screens before they come into view |
 | Content jumps when an image loads | Every tile's size is known **before** it is added (stored in the cache database); placeholders have the exact height |
 | `GtkListView` estimates variable row heights and jumps | Custom `StripView` instead of `GtkListView`: all tile positions are precomputed, `snapshot()` only calls `append_texture` for visible textures (microseconds per frame) |
 | Disk/DB/JS work on the main thread | Progress saving, DB writes, extension JS, network: all in the background; progress saved in batches every 2 s |
@@ -98,7 +98,7 @@ Goal: every frame ≤ 16.6 ms on a 60 Hz display; main-thread work per frame ≤
 ## Performance rules
 
 1. Images are **downscaled to screen width** once and cached on disk
-2. Long strips are split into **~1500 px tiles** (no huge GPU textures)
+2. Long strips are split into **~500 px tiles** (no huge GPU textures; 1500 px tiles stalled the GPU for up to ~180 ms when a 2x zoomed tile was first drawn)
 3. Off-screen tiles are released from memory (with 16 GB, a buffer of a few screens is kept)
 4. Prefetching/decoding runs on **low-priority** threads (nice + idle I/O priority)
 5. No effects: no blur, no shadows, no continuous animation
@@ -233,7 +233,18 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
    - Playback position read via mpv's JSON IPC socket → resume, watched markers, next episode
    - UI: same retro library with a "Manga / Anime" tab; same triple-tap logic in mpv via keys/IPC
 
+## Phase 0 findings (measured on the Yoga, 2560×1440 @ 1.25, release build)
+
+- **Renderer:** GTK picks the Vulkan renderer here: ~10 ms of app CPU per frame and ~20 % slow frames when full screen. The GL renderer (`GSK_RENDERER=gl`) needs ~1.7 ms per frame. The app now forces `gl` unless `GSK_RENDERER` is set.
+- **Pixel format:** workers produce RGBA8 (the GPU's native layout) so the main thread never converts pixels.
+- **Tile size:** 500 px default (`MANGA_TILE_PX` overrides it). Pre-uploading textures off-screen ("warm-up") made no measurable difference and was removed.
+- **Idle:** 0 CPU ticks over 8 s; RSS stays at ~220–350 MB while scrolling 20 000 px pages at 6000 px/s.
+- Still to verify by hand: touch, pen, pinch, triple tap, heat/fan (cannot be simulated here).
+
 ## Development and testing
+
+- Hands-free measurement: `MANGA_FRAME_STATS=1 MANGA_AUTOSCROLL=<px/s> [MANGA_AUTOZOOM=1] MANGA_AUTOSCROLL_SECS=<n> target/release/manga-reader` prints every frame over 20 ms and a summary at exit. `MANGA_WINDOWED=1` skips full screen, `MANGA_OPEN_PANEL=1` opens the panel at start.
+- Test data: `python3 tools/gen_test_strips.py` writes sample chapters to `~/Manga/TestSeri`.
 
 - Development happens directly on the Yoga (Fedora KDE, Claude Code CLI) — touch/pen/heat can only be tested on the real device
 - Build speed: `mold` linker, dependencies prebuilt with `opt-level`
