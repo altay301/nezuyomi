@@ -20,6 +20,7 @@ use crate::player::{self, PlayRequest, PlayerEvent};
 use crate::source::{ChapterInfo, MangaSummary, Source, SourceKind};
 use crate::{paths, stats};
 
+pub const APP_ID: &str = "io.github.altay301.MangaReader";
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
 const BUNDLED_EXTENSIONS: [&str; 2] = [include_str!("../extensions/ExampleSite.js"), include_str!("../extensions/anime.example")];
 
@@ -27,7 +28,7 @@ pub fn run() -> glib::ExitCode {
     // MANGA_NON_UNIQUE=1 lets a test run start next to a running instance instead of
     // being forwarded to it.
     let flags = if std::env::var_os("MANGA_NON_UNIQUE").is_some() { gtk::gio::ApplicationFlags::NON_UNIQUE } else { gtk::gio::ApplicationFlags::empty() };
-    let app = gtk::Application::builder().application_id("io.github.altay301.MangaReader").flags(flags).build();
+    let app = gtk::Application::builder().application_id(APP_ID).flags(flags).build();
     app.connect_activate(build);
     app.run_with_args(&["manga-reader"])
 }
@@ -85,7 +86,21 @@ struct App {
     player_events: async_channel::Sender<PlayerEvent>,
 }
 
+/// App icon for the window, the task switcher and the panel. Installed copies come from
+/// the icon theme; a checkout run (`cargo run`) falls back to `data/icons` in the sources.
+fn setup_icon() {
+    if let Some(display) = gdk::Display::default() {
+        let theme = gtk::IconTheme::for_display(&display);
+        theme.add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons"));
+        if !theme.has_icon(APP_ID) {
+            eprintln!("[app] icon '{APP_ID}' not found in the icon theme");
+        }
+    }
+    gtk::Window::set_default_icon_name(APP_ID);
+}
+
 fn build(app: &gtk::Application) {
+    setup_icon();
     load_css();
     if let Some(settings) = gtk::Settings::default() {
         // Triple tap: three touches within 400 ms and 40 px count as one sequence.
