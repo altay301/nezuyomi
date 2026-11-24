@@ -1,15 +1,12 @@
 #!/bin/bash
 # Regenerates data/icons/ from branding/*.svg (needs ImageMagick with librsvg).
-# 16-48 px use the simplified small tile, 64 px and up the full logo.
+# Every size uses the full logo with the mouse (the owner wants the mouse at all sizes);
+# branding/logo-tile-small.svg (book only) is kept but no longer used for the app icon.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ID=io.github.altay301.MangaReader
 OUT=data/icons/hicolor
-for size in 16 24 32 48; do
-    mkdir -p "$OUT/${size}x${size}/apps"
-    magick -background none -density 768 branding/logo-tile-small.svg -resize "${size}x${size}" "PNG32:$OUT/${size}x${size}/apps/$ID.png"
-done
-for size in 64 128 256 512; do
+for size in 16 24 32 48 64 128 256 512; do
     mkdir -p "$OUT/${size}x${size}/apps"
     magick -background none -density 768 branding/logo-tile.svg -resize "${size}x${size}" "PNG32:$OUT/${size}x${size}/apps/$ID.png"
 done
