@@ -196,6 +196,12 @@ impl Db {
         self.call(move |c| c.query_row(&format!("SELECT {LINK_COLS} FROM nyaa_links WHERE source = ?1 AND manga_id = ?2"), params![s, m], link_row).optional().ok().flatten()).flatten()
     }
 
+    pub fn nyaa_set_link_auto(&self, id: i64, auto: bool) {
+        self.exec(move |c| {
+            let _ = c.execute("UPDATE nyaa_links SET auto = ?2 WHERE id = ?1", params![id, auto]);
+        });
+    }
+
     pub fn nyaa_remove_link(&self, id: i64) {
         self.exec(move |c| {
             let _ = c.execute("DELETE FROM nyaa_links WHERE id = ?1", [id]);

@@ -11,6 +11,7 @@ use crate::app::background;
 use crate::covers::Covers;
 use crate::db::{Db, DownloadRow, LibraryEntry, Progress};
 use crate::downloads::{self, Downloads, Event};
+use crate::nyaa::store::Link as NyaaLink;
 use crate::source::{ChapterInfo, MangaDetails, MangaSummary, Source, SourceKind};
 
 struct Loaded {
@@ -23,6 +24,8 @@ struct Loaded {
     details: MangaDetails,
     /// Showing stored data because the network failed.
     offline: bool,
+    /// The Nyaa link of this series and how many volumes are on disk.
+    nyaa: Option<(NyaaLink, usize)>,
 }
 
 /// chapter id -> (download state, pages done, pages total)
@@ -38,6 +41,10 @@ pub struct DetailsView {
     library_btn: gtk::Button,
     continue_btn: gtk::Button,
     download_btn: gtk::Button,
+    nyaa_btn: gtk::Button,
+    volumes_btn: gtk::Button,
+    on_nyaa_link: RefCell<Option<Rc<dyn Fn(Arc<dyn Source>, MangaSummary)>>>,
+    on_nyaa_volumes: RefCell<Option<Rc<dyn Fn(String)>>>,
     dl: Arc<Downloads>,
     dl_state: RefCell<DlStates>,
     list: gtk::ListView,
@@ -64,6 +71,10 @@ impl DetailsView {
         actions.append(&library_btn);
         actions.append(&continue_btn);
         actions.append(&download_btn);
+        let nyaa_btn = gtk::Button::builder().label("Link to Nyaa…").css_classes(["retro"]).visible(false).build();
+        let volumes_btn = gtk::Button::builder().label("Volumes on disk").css_classes(["retro"]).visible(false).build();
+        actions.append(&nyaa_btn);
+        actions.append(&volumes_btn);
         let info = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).build();
         for w in [title.upcast_ref::<gtk::Widget>(), meta.upcast_ref(), genres.upcast_ref(), actions.upcast_ref()] {
             info.append(w);
@@ -96,6 +107,10 @@ impl DetailsView {
             library_btn: library_btn.clone(),
             continue_btn: continue_btn.clone(),
             download_btn: download_btn.clone(),
+            nyaa_btn: nyaa_btn.clone(),
+            volumes_btn: volumes_btn.clone(),
+            on_nyaa_link: RefCell::new(None),
+            on_nyaa_volumes: RefCell::new(None),
             dl,
             dl_state: RefCell::default(),
             list: list.clone(),
@@ -130,6 +145,27 @@ impl DetailsView {
                 row.append(&note);
                 row.append(&button);
                 item.set_child(Some(&row));
+            }
+        });
+        nyaa_btn.connect_clicked({
+            let w = Rc::downgrade(&this);
+            move |_| {
+                let Some(t) = w.upgrade() else { return };
+                let (source, manga) = {
+                    let loaded = t.loaded.borrow();
+                    let Some(l) = loaded.as_ref() else { return };
+                    (l.source.clone(), l.manga.clone())
+                };
+                if let Some(f) = t.on_nyaa_link.borrow().clone() { f(source, manga) }
+            }
+        });
+        volumes_btn.connect_clicked({
+            let w = Rc::downgrade(&this);
+            move |_| {
+                let Some(t) = w.upgrade() else { return };
+                let folder = t.loaded.borrow().as_ref().and_then(|l| l.nyaa.as_ref().map(|(link, _)| link.folder.clone()));
+                let name = folder.and_then(|f| std::path::Path::new(&f).file_name().map(|n| n.to_string_lossy().into_owned()));
+                if let (Some(name), Some(f)) = (name, t.on_nyaa_volumes.borrow().clone()) { f(name) }
             }
         });
         download_btn.connect_clicked({
@@ -208,6 +244,45 @@ impl DetailsView {
     pub fn set_on_back(&self, f: impl Fn() + 'static) {
         *self.on_back.borrow_mut() = Some(Box::new(f));
     }
+    pub fn set_on_nyaa_link(&self, f: impl Fn(Arc<dyn Source>, MangaSummary) + 'static) {
+        *self.on_nyaa_link.borrow_mut() = Some(Rc::new(f));
+    }
+    pub fn set_on_nyaa_volumes(&self, f: impl Fn(String) + 'static) {
+        *self.on_nyaa_volumes.borrow_mut() = Some(Rc::new(f));
+    }
+    /// Re-reads the Nyaa link (after linking) without reloading the whole page.
+    pub fn refresh_nyaa(self: &Rc<Self>) {
+        let Some((source, id)) = self.loaded.borrow().as_ref().map(|l| (l.source.id().to_string(), l.manga.id.clone())) else { return };
+        let (db, this) = (self.db.clone(), self.clone());
+        background(
+            move || db.nyaa_link_for_series(&source, &id).map(|l| { let n = db.nyaa_owned_volumes(l.id).len(); (l, n) }),
+            move |nyaa| {
+                if let Some(l) = this.loaded.borrow_mut().as_mut() { l.nyaa = nyaa }
+                this.update_nyaa_buttons();
+            },
+        );
+    }
+
+    fn update_nyaa_buttons(&self) {
+        let loaded = self.loaded.borrow();
+        let Some(l) = loaded.as_ref() else { return };
+        // Only online manga can be linked; the local and Nyaa sources already are files.
+        let linkable = l.source.kind() == SourceKind::Manga && !matches!(l.source.id(), "local" | "nyaa") && !l.offline;
+        self.nyaa_btn.set_visible(linkable);
+        match &l.nyaa {
+            Some((link, n)) => {
+                self.nyaa_btn.set_label(&format!("Nyaa: {} ✓", link.uploader));
+                self.volumes_btn.set_visible(linkable);
+                self.volumes_btn.set_label(&format!("Volumes on disk ({n})"));
+                self.volumes_btn.set_sensitive(*n > 0);
+            }
+            None => {
+                self.nyaa_btn.set_label("Link to Nyaa…");
+                self.volumes_btn.set_visible(false);
+            }
+        }
+    }
+
     pub fn set_on_status(&self, f: impl Fn(&str) + 'static) {
         *self.on_status.borrow_mut() = Some(Box::new(f));
     }
@@ -251,16 +326,17 @@ impl DetailsView {
                 chapters.sort_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
                 let progress = db.progress_for_manga(sid.clone(), id.clone());
                 let in_library = db.is_in_library(sid.clone(), id.clone());
-                let dl = db.download_states(sid, id);
-                Ok::<_, String>((details, chapters, progress, in_library, dl, offline))
+                let dl = db.download_states(sid.clone(), id.clone());
+                let nyaa = db.nyaa_link_for_series(&sid, &id).map(|l| { let n = db.nyaa_owned_volumes(l.id).len(); (l, n) });
+                Ok::<_, String>((details, chapters, progress, in_library, dl, offline, nyaa))
             },
-            move |result: Result<(MangaDetails, Vec<ChapterInfo>, HashMap<String, Progress>, bool, DlStates, bool), String>| {
+            move |result: Result<(MangaDetails, Vec<ChapterInfo>, HashMap<String, Progress>, bool, DlStates, bool, Option<(NyaaLink, usize)>), String>| {
                 match result {
                     Err(e) => {
                         eprintln!("[details] {e}");
                         this.say(&format!("Error: {e}"));
                     }
-                    Ok((d, chapters, progress, in_library, dl, offline)) => {
+                    Ok((d, chapters, progress, in_library, dl, offline, nyaa)) => {
                         this.title.set_text(&d.title);
                         this.meta.set_text(&[d.author.clone(), d.status.clone(), Some(format!("{} {}", chapters.len(), if source.kind() == SourceKind::Anime { "episodes" } else { "chapters" }))].into_iter().flatten().collect::<Vec<_>>().join(" · "));
                         this.genres.set_text(&d.genres.join(", "));
@@ -273,7 +349,7 @@ impl DetailsView {
                         manga.title = d.title.clone();
                         *this.dl_state.borrow_mut() = dl;
                         let noun = if source.kind() == SourceKind::Anime { "episodes" } else { "chapters" };
-                        *this.loaded.borrow_mut() = Some(Loaded { source, manga, chapters, progress, in_library, details: d, offline });
+                        *this.loaded.borrow_mut() = Some(Loaded { source, manga, chapters, progress, in_library, details: d, offline, nyaa });
                         this.refresh_rows();
                         this.say(&if offline {
                             format!("Offline: showing {} downloaded chapters", this.model.n_items())
@@ -402,6 +478,10 @@ impl DetailsView {
         let refs: Vec<&str> = items.iter().map(String::as_str).collect();
         self.model.splice(0, self.model.n_items(), &refs);
         self.library_btn.set_label(if l.in_library { "Remove from library" } else { "Add to library" });
+        drop(loaded);
+        self.update_nyaa_buttons();
+        let loaded = self.loaded.borrow();
+        let Some(l) = loaded.as_ref() else { return };
         self.library_btn.set_sensitive(!l.offline);
         let anime = l.source.kind() == SourceKind::Anime;
         self.download_btn.set_visible(!anime);

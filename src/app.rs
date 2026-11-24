@@ -16,6 +16,9 @@ use crate::downloads::{self, Downloads};
 use crate::ext::JsSource;
 use crate::local::LocalSource;
 use crate::reader::Reader;
+use crate::nyaa::power;
+use crate::nyaa::service::{Event as NyaaEvent, Service as NyaaService};
+use crate::nyaa_ui::{self, NyaaPage};
 use crate::player::{self, PlayRequest, PlayerEvent};
 use crate::source::{ChapterInfo, MangaSummary, Source, SourceKind};
 use crate::{paths, stats};
@@ -48,12 +51,14 @@ pub fn background<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, 
 }
 
 /// Local folders, bundled extensions and user extensions (which override bundled ones by id).
-fn load_sources() -> Vec<Arc<dyn Source>> {
+fn load_sources(db: Arc<Db>) -> Vec<Arc<dyn Source>> {
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from).unwrap_or_else(paths::manga_root);
     // "Nyaa" (downloaded volumes) is its own source and tab; it is not a series of "Local".
-    let nyaa_root = root.join("Nyaa");
+    let nyaa_root = crate::nyaa::sync::Settings::load(&db).root;
+    let hidden: Vec<String> = nyaa_root.parent().filter(|p| *p == root).and_then(|_| nyaa_root.file_name()).map(|n| vec![n.to_string_lossy().into_owned()]).unwrap_or_default();
+    let hidden_refs: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let mut sources: Vec<Arc<dyn Source>> = vec![
-        Arc::new(LocalSource::new("local", "Local", root, &["Nyaa"])),
+        Arc::new(LocalSource::new("local", "Local", root, &hidden_refs)),
         Arc::new(LocalSource::new("nyaa", "Nyaa", nyaa_root, &[])),
     ];
     let mut codes: Vec<String> = BUNDLED_EXTENSIONS.iter().map(|s| s.to_string()).collect();
@@ -89,6 +94,11 @@ struct App {
     sources: Vec<Arc<dyn Source>>,
     inhibit_cookie: Cell<u32>,
     player_events: async_channel::Sender<PlayerEvent>,
+    nyaa: Rc<NyaaPage>,
+    nyaa_btn: gtk::ToggleButton,
+    nyaa_service: Arc<NyaaService>,
+    /// Page of the content stack the series page returns to ("grid" or "nyaa").
+    back_to: RefCell<String>,
 }
 
 /// App icon for the window, the task switcher and the panel. Installed copies come from
@@ -128,7 +138,8 @@ fn build(app: &gtk::Application) {
             return;
         }
     };
-    background(load_sources, move |sources| finish_build(app, window, db, sources));
+    let db2 = db.clone();
+    background(move || load_sources(db2), move |sources| finish_build(app, window, db, sources));
 }
 
 fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: Arc<Db>, sources: Vec<Arc<dyn Source>>) {
@@ -137,7 +148,11 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     let (pl_tx, pl_rx) = async_channel::unbounded::<PlayerEvent>();
     let (dl_tx, dl_rx) = async_channel::unbounded::<downloads::Event>();
     let dl = Downloads::new(db.clone(), dl_tx);
-    let details = DetailsView::new(covers, db.clone(), dl.clone());
+    let details = DetailsView::new(covers.clone(), db.clone(), dl.clone());
+    let (nyaa_tx, nyaa_rx) = async_channel::unbounded::<NyaaEvent>();
+    let nyaa_service = NyaaService::new(db.clone(), nyaa_tx);
+    let interval_min = Rc::new(Cell::new(60u32));
+    let nyaa_page = NyaaPage::new(covers, sources.clone(), db.clone(), nyaa_service.clone(), interval_min.clone());
 
     let stats_label = gtk::Label::builder().css_classes(["frame-stats"]).halign(gtk::Align::Start).valign(gtk::Align::Start).can_target(false).visible(stats::enabled()).build();
     let reader = Reader::new(db.clone(), stats::enabled().then_some(&stats_label));
@@ -146,6 +161,7 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     let content = gtk::Stack::builder().vexpand(true).hexpand(true).build();
     content.add_named(&browse.root, Some("grid"));
     content.add_named(&details.root, Some("details"));
+    content.add_named(&nyaa_page.root, Some("nyaa"));
     let status = gtk::Label::builder().xalign(0.0).css_classes(["retro-status"]).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
     let main_col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).css_classes(["retro-main"]).build();
     main_col.append(&content);
@@ -157,9 +173,12 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     sidebar.append(&library_btn);
     let downloads_btn = gtk::ToggleButton::builder().label("Downloads").css_classes(["retro-place"]).group(&library_btn).build();
     sidebar.append(&downloads_btn);
+    let nyaa_btn = gtk::ToggleButton::builder().label("Nyaa").css_classes(["retro-place"]).group(&library_btn).build();
+    sidebar.append(&nyaa_btn);
     let mut source_btns = Vec::new();
     for (heading, kind) in [("Manga", SourceKind::Manga), ("Anime", SourceKind::Anime)] {
-        let of_kind: Vec<_> = sources.iter().filter(|s| s.kind() == kind).collect();
+        // "Nyaa" has its own place above, not an entry among the manga sources.
+        let of_kind: Vec<_> = sources.iter().filter(|s| s.kind() == kind && s.id() != "nyaa").collect();
         if of_kind.is_empty() {
             continue;
         }
@@ -192,6 +211,10 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
         sources,
         inhibit_cookie: Cell::new(0),
         player_events: pl_tx,
+        nyaa: nyaa_page.clone(),
+        nyaa_btn: nyaa_btn.clone(),
+        nyaa_service: nyaa_service.clone(),
+        back_to: RefCell::new("grid".into()),
     });
 
     // ---- wiring ----------------------------------------------------------------
@@ -240,7 +263,35 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
     });
     details.set_on_back({
         let a = app.clone();
-        move || a.content.set_visible_child_name("grid")
+        move || {
+            let page = a.back_to.borrow().clone();
+            a.content.set_visible_child_name(&page);
+        }
+    });
+    nyaa_page.series.set_on_open({
+        let a = app.clone();
+        move |source, manga| a.open_details(source, manga)
+    });
+    nyaa_page.series.set_on_status({
+        let a = app.clone();
+        move |m: &str| a.status.set_text(m)
+    });
+    nyaa_btn.connect_toggled({
+        let a = app.clone();
+        move |b| {
+            if b.is_active() {
+                a.content.set_visible_child_name("nyaa");
+                a.nyaa.show();
+            }
+        }
+    });
+    details.set_on_nyaa_link({
+        let a = app.clone();
+        move |source, manga| a.open_link_dialog(source, manga)
+    });
+    details.set_on_nyaa_volumes({
+        let a = app.clone();
+        move |folder| a.open_nyaa_series(folder)
     });
     details.set_on_read({
         let a = app.clone();
@@ -295,6 +346,85 @@ fn finish_build(gtk_app: gtk::Application, window: gtk::ApplicationWindow, db: A
         move |rows| dl.resume(rows, &sources)
     });
 
+    // ---- Nyaa: events, timers, power policy ------------------------------------------------------
+    let active = Rc::new(Cell::new(false));
+    let power_paused = Rc::new(Cell::new(false));
+    glib::spawn_future_local({
+        let (w, active) = (Rc::downgrade(&app), active.clone());
+        async move {
+            while let Ok(ev) = nyaa_rx.recv().await {
+                let Some(a) = w.upgrade() else { break };
+                match ev {
+                    NyaaEvent::Cycle(report) => {
+                        a.nyaa.show_report(&report);
+                        if report.queued > 0 || report.completed > 0 || report.new_releases > 0 {
+                            a.status.set_text(&format!("Nyaa: {} new releases, {} queued, {} finished", report.new_releases, report.queued, report.completed));
+                        }
+                    }
+                    NyaaEvent::Linked(Ok((link, n))) => {
+                        a.status.set_text(&format!("Linked \"{}\" to {}: {n} matching releases found", link.title, link.uploader));
+                        a.details.refresh_nyaa();
+                        a.nyaa_service.run_cycle(false); // queue what is new, right away
+                    }
+                    NyaaEvent::Linked(Err(e)) => a.status.set_text(&format!("Cannot link: {e}")),
+                    NyaaEvent::Queued { title, result } => a.status.set_text(&match result {
+                        Ok(_) => format!("Nyaa: added {title}"),
+                        Err(e) => format!("Nyaa: {title}: {e}"),
+                    }),
+                    NyaaEvent::Power { paused, result } => a.status.set_text(&match (paused, result) {
+                        (true, Ok(n)) => format!("On battery in tablet mode: paused {n} Nyaa downloads"),
+                        (false, Ok(n)) if n > 0 => format!("Resumed {n} Nyaa downloads"),
+                        (_, Ok(_)) => continue, // nothing paused or resumed: keep the loop running
+                        (_, Err(e)) => format!("Nyaa power policy: {e}"),
+                    }),
+                    NyaaEvent::Qbit(r) => a.nyaa.show_connection_result(&r),
+                    NyaaEvent::Changed => a.nyaa.refresh(),
+                    NyaaEvent::Active(v) => active.set(v),
+                }
+            }
+        }
+    });
+    // Feed check: first one shortly after start, then every `interval` minutes. Never while
+    // paused by the power policy (battery + tablet mode): that also saves the wake-ups.
+    fn schedule_cycle(svc: Arc<NyaaService>, interval: Rc<Cell<u32>>, paused: Rc<Cell<bool>>, delay_secs: u32) {
+        glib::timeout_add_seconds_local_once(delay_secs, move || {
+            if !paused.get() {
+                svc.run_cycle(false);
+            }
+            let next = interval.get().max(15) * 60;
+            schedule_cycle(svc, interval, paused, next);
+        });
+    }
+    // The interval setting is read once in the background; the Nyaa page updates the cell when it is saved.
+    background({
+        let db = db.clone();
+        move || crate::nyaa::sync::Settings::load(&db).interval_min
+    }, {
+        let (cell, svc, paused) = (interval_min.clone(), nyaa_service.clone(), power_paused.clone());
+        move |minutes| {
+            cell.set(minutes);
+            schedule_cycle(svc, cell, paused, 30);
+        }
+    });
+    // Progress: every 15 s, only while something of ours is downloading and not paused.
+    glib::timeout_add_seconds_local(15, {
+        let (svc, active, paused) = (nyaa_service.clone(), active.clone(), power_paused.clone());
+        move || {
+            if active.get() && !paused.get() {
+                svc.poll();
+            }
+            glib::ControlFlow::Continue
+        }
+    });
+    nyaa_service.poll(); // learn once whether something is already downloading
+    power::watch({
+        let (svc, paused) = (nyaa_service.clone(), power_paused.clone());
+        move |p| {
+            paused.set(p);
+            svc.apply_power(p);
+        }
+    });
+
     // Esc toggles the reader's control panel.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -344,6 +474,9 @@ impl App {
     }
 
     fn open_details(&self, source: Arc<dyn Source>, manga: MangaSummary) {
+        if let Some(from) = self.content.visible_child_name().filter(|n| n != "details") {
+            *self.back_to.borrow_mut() = from.to_string();
+        }
         self.content.set_visible_child_name("details");
         self.details.open(source, manga);
     }
@@ -362,6 +495,37 @@ impl App {
     }
 
     /// Anime: resolve the streams on a background thread, then hand the first one to mpv.
+    /// "Link to Nyaa…" on a series page: choose an uploader and a phrase once.
+    fn open_link_dialog(self: &Rc<Self>, _source: Arc<dyn Source>, manga: MangaSummary) {
+        let (db, this) = (self.db.clone(), self.clone());
+        let source_id = _source.id().to_string();
+        background(
+            move || {
+                db.nyaa_seed_uploaders(&crate::nyaa::DEFAULT_UPLOADERS);
+                db.nyaa_uploaders().into_iter().filter(|u| u.enabled).map(|u| u.name).collect::<Vec<_>>()
+            },
+            move |uploaders| {
+                if uploaders.is_empty() {
+                    this.status.set_text("No followed uploaders: add some in Nyaa → Settings");
+                    return;
+                }
+                let (svc, title, id) = (this.nyaa_service.clone(), manga.title.clone(), manga.id.clone());
+                nyaa_ui::show_link_dialog(this.window.upcast_ref(), uploaders, &manga.title, move |uploader, phrase, auto| {
+                    svc.link(source_id.clone(), id.clone(), title.clone(), uploader, phrase, auto);
+                });
+            },
+        );
+    }
+
+    /// "Volumes on disk": the downloaded series in the Nyaa place.
+    fn open_nyaa_series(&self, folder: String) {
+        if let Some(src) = self.sources.iter().find(|s| s.id() == "nyaa").cloned() {
+            *self.back_to.borrow_mut() = self.content.visible_child_name().filter(|n| n != "details").map(|n| n.to_string()).unwrap_or_else(|| "grid".into());
+            self.content.set_visible_child_name("details");
+            self.details.open(src, MangaSummary { id: folder.clone(), title: folder, cover: None });
+        }
+    }
+
     fn watch(&self, source: Arc<dyn Source>, manga: MangaSummary, episode: &ChapterInfo, start: f64) {
         self.status.set_text(&format!("Starting {}…", episode.name));
         let (db, tx, ep) = (self.db.clone(), self.player_events.clone(), episode.clone());
@@ -433,8 +597,20 @@ impl App {
     fn auto_view(self: &Rc<Self>, spec: &str, buttons: &[(gtk::ToggleButton, Arc<dyn Source>)]) {
         let mut it = spec.splitn(3, ':');
         let (kind, sid) = (it.next().unwrap_or_default(), it.next().unwrap_or_default());
+        if kind == "nyaa" {
+            // MANGA_VIEW=nyaa:<series|releases|links|settings>
+            self.nyaa_btn.set_active(true);
+            self.nyaa.select_tab(if sid.is_empty() { "series" } else { sid });
+            return;
+        }
         let Some((btn, source)) = buttons.iter().find(|(_, s)| s.id() == sid) else { return };
         btn.set_active(true);
+        if kind == "link" {
+            // MANGA_VIEW=link:<source>:<manga id>: opens the "Link to Nyaa" window (test hook).
+            let id = it.next().unwrap_or_default().to_string();
+            self.open_link_dialog(source.clone(), MangaSummary { title: id.clone(), id, cover: None });
+            return;
+        }
         if kind == "details" {
             let id = it.next().unwrap_or_default().to_string();
             self.open_details(source.clone(), MangaSummary { title: id.clone(), id, cover: None });

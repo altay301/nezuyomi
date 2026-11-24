@@ -146,3 +146,10 @@ scrollbar { min-width: 20px; }
 
 button.retro.retro-small { min-height: 36px; min-width: 88px; padding: 0 10px; font-size: 13px; }
 button.retro:disabled label { color: #888888; }
+
+/* ---- Nyaa page ------------------------------------------------------------- */
+.retro-banner-box { padding: 6px 8px; background: #FFFFCC; border: 2px solid; border-color: #666666 #FFFFFF #FFFFFF #666666; }
+label.retro-banner { color: #000000; }
+label.retro-error { color: #AA0000; }
+list.nyaa-list, list.nyaa-list row { background: transparent; }
+checkbutton, switch { min-height: 32px; }

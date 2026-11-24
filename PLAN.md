@@ -263,9 +263,9 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 - **Phase 3 skipped.** The Suwayomi bridge needs a JVM process (typically 300–600 MB RAM, seconds of start-up, constant GC work), which conflicts with the low-heat goal. Revisit only if a needed source exists nowhere else. Categories, backup and tracking are also postponed.
 - **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). `extensions/anime.example` is ported from anime-cli (search page → episode list API → server list API → EmbedHost embed → config blob `base64(json XOR "otaku-embed-v1")` → HLS master playlist). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
 
-## Plan: Nyaa torrent downloads (Phase 2 addition, not implemented)
+## Nyaa torrent downloads (Phase 2 addition, implemented)
 
-Status: **planning only, waiting for the owner's answers to "Open decisions" below.** Nothing in this section is coded yet.
+Status: **implemented** (milestones 1–5 below). The "Open decisions" were answered by the owner: every proposed default was accepted; Nyaa downloads live in their own place, apart from the other sources; "Start qBittorrent" is a button, never automatic; port 8080; interval 60 minutes. Implementation notes and findings are at the end of this section.
 
 ### Goal
 
@@ -408,7 +408,7 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 - qBittorrent's Web UI is off by default → explicit onboarding message; the app cannot enable it.
 - RAR support depends on the installed `7z`/`unar` → missing tools produce a clear "install 7zip" message for that volume only.
 
-### Open decisions (waiting for the owner)
+### Decisions (answered 2026-11-25)
 
 1. **Category scope:** `3_0` (all Literature incl. Raw and Non-English) or only `3_1` English-translated? *Proposed: `3_1`.*
 2. **Non-manga files:** skip EPUB/audiobooks/PDF entirely (UploaderC and UploaderF post many)? *Proposed: skip.*
@@ -420,6 +420,17 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 8. **Variants and packs:** for UploaderF's repack/Empire pairs which variant wins; skip UploaderB's weekly chapter packs and "Digital-Compilation" releases? *Proposed: prefer Empire, skip weekly packs, include compilations.*
 9. **qBittorrent start-up:** show the setup steps only, or also launch `qbittorrent` when it is not running? Web UI port (8080?).
 10. **Poll interval:** default 60 minutes OK?
+
+### Implementation notes and findings (2026-11-25)
+
+- **qBittorrent 5.2.4 will not start its Web UI without credentials.** With a profile that has no user name/password the log says `(C) WebUI: Credentials are not set` and nothing listens. With credentials set **and** "Bypass authentication for clients on localhost" ticked, the API needs no login (Web API 2.15.1). So the setup steps the app shows are: enable the Web UI, set *any* user name and password, tick the bypass. The app never needs that password in bypass mode; if the owner prefers to keep authentication, user name in Settings and password in the Secret Service work as planned.
+- **Web API 2.15** requires `shareLimitAction` in `torrents/setShareLimits` (found by the integration test); we send `Stop`.
+- **Verified against real data:** all 450 items of the six followed feeds are classified (parsed, or skipped as not manga). Skipped on purpose: audiobooks, EPUB, weekly chapter packs, "app rip" packs and **JPEG XL** releases (the reader cannot decode JXL pages; an archive with only JXL/AVIF pages gets a clear message too).
+- **Real end-to-end run** (isolated qBittorrent, isolated data folder, one real 81 MiB release from the live swarm): cycle → match → `.torrent` fetched and hash-verified → added paused → file priorities → started → downloaded → timer poll → `done` → volume recorded → the CBZ appears in the Nyaa place with its cover and opens in the normal reader. That run also caught a real bug (an early `return` in the UI event loop ended event handling at start-up).
+- **Safety nets that exist and are tested:** only our category/hashes are ever passed to qBittorrent (`all` and malformed hashes are refused; a torrent in another category and one the user stopped by hand survive stop/start/policy calls untouched); the downloaded `.torrent`'s info hash must equal the feed's; torrent files, archive entries and folder names are sanitised; the torrent URL must be a `nyaa.si/download/*.torrent` link; size cap, free-space check and per-torrent file selection (owned volumes, EPUB and other series are set to priority 0).
+- **Where things are:** `src/nyaa/` (`rules` + `rules.toml`, `feed`, `matcher`, `torrent`, `qbit`, `secret`, `store`, `sync`, `service`, `power`), `src/nyaa_ui.rs` (the Nyaa place and the link window), `src/archive.rs` (CBZ/ZIP in-process, CBR/RAR/7z through `7z`), `LocalSource` (archives as chapters; a second instance "Nyaa").
+- **Testing tools:** `manga-reader --nyaa-probe` classifies the live feeds; `tools/qbt-test-instance.sh start|stop` runs a throw-away headless qBittorrent (own profile and port); the integration tests marked `#[ignore]` use it: `QBT_TEST_PORT=18080 QBT_TEST_DIR=<dir> cargo test --release qbit_isolated nyaa_end_to_end power_policy_isolated -- --ignored`.
+- **Not done / limits:** the power policy runs only while the app is open; no per-series custom exclude field in the link window (the column exists in the database, the isolated run used it); series linked in the library are matched by phrase only (no cover/ID matching); CBR/7z covers are not generated (only CBZ), such series show a placeholder until a volume is opened.
 
 ## Development and testing
 

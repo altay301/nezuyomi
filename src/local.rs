@@ -12,12 +12,12 @@ pub struct LocalSource {
     name: &'static str,
     root: PathBuf,
     /// Folder names under `root` that are not series (e.g. `Nyaa`, which has its own source).
-    hidden: &'static [&'static str],
+    hidden: Vec<String>,
 }
 
 impl LocalSource {
-    pub fn new(id: &'static str, name: &'static str, root: PathBuf, hidden: &'static [&'static str]) -> Self {
-        Self { id, name, root, hidden }
+    pub fn new(id: &'static str, name: &'static str, root: PathBuf, hidden: &[&str]) -> Self {
+        Self { id, name, root, hidden: hidden.iter().map(|s| s.to_string()).collect() }
     }
 
     pub fn root(&self) -> &Path {
@@ -28,7 +28,7 @@ impl LocalSource {
         let mut dirs: Vec<PathBuf> = std::fs::read_dir(&self.root)
             .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect())
             .unwrap_or_default();
-        dirs.retain(|d| !self.hidden.contains(&name_of(d).as_str()));
+        dirs.retain(|d| !self.hidden.contains(&name_of(d)));
         dirs.sort_by(|a, b| library::natural_cmp(&name_of(a), &name_of(b)));
         dirs
     }

@@ -11,6 +11,7 @@ mod loader;
 mod local;
 mod net;
 mod nyaa;
+mod nyaa_ui;
 mod pages;
 mod player;
 mod paths;
