@@ -10,9 +10,18 @@ const EXTENSIONS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
 /// One page image with its original pixel size (read from the header only).
 #[derive(Clone, Debug)]
 pub struct PageInfo {
+    /// Local file; for remote pages this is where the download is cached.
     pub path: PathBuf,
     pub width: u32,
     pub height: u32,
+    /// Set for pages that must be downloaded to `path` first.
+    pub remote: Option<Remote>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Remote {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,11 +112,15 @@ pub fn scan_series(root: &Path) -> Series {
     Series { name, chapters }
 }
 
+/// Image files of a folder in natural order.
+pub fn list_images(dir: &Path) -> Vec<PathBuf> {
+    sorted_entries(dir).into_iter().filter(|p| p.is_file() && is_image(p)).collect()
+}
+
 /// Lists the pages of a chapter and reads each image size from its header.
 pub fn read_pages(dir: &Path) -> Vec<PageInfo> {
-    sorted_entries(dir)
+    list_images(dir)
         .into_iter()
-        .filter(|p| p.is_file() && is_image(p))
         .filter_map(|path| {
             let (width, height) = image::ImageReader::open(&path)
                 .ok()?
@@ -115,7 +128,7 @@ pub fn read_pages(dir: &Path) -> Vec<PageInfo> {
                 .ok()?
                 .into_dimensions()
                 .ok()?;
-            (width > 0 && height > 0).then_some(PageInfo { path, width, height })
+            (width > 0 && height > 0).then_some(PageInfo { path, width, height, remote: None })
         })
         .collect()
 }

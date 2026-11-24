@@ -12,6 +12,8 @@ use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::RgbaImage;
 
+use crate::library::Remote;
+
 /// One tile of a page: which source rows to crop and the output pixel size.
 pub struct TileJob {
     pub tile: usize,
@@ -26,6 +28,8 @@ pub struct Job {
     pub generation: u64,
     pub q: u8,
     pub path: PathBuf,
+    /// Download to `path` first when the file is not there yet.
+    pub remote: Option<Remote>,
     pub tiles: Vec<TileJob>,
 }
 
@@ -178,6 +182,12 @@ fn decode_cached(shared: &Shared, job: &Job) -> Option<Arc<RgbaImage>> {
             return Some(img.clone());
         }
     }
+    if let Some(remote) = &job.remote {
+        if let Err(e) = ensure_downloaded(&job.path, remote) {
+            eprintln!("[loader] {e}");
+            return None;
+        }
+    }
     let img = match image::ImageReader::open(&job.path)
         .and_then(|r| r.with_guessed_format())
         .map_err(|e| e.to_string())
@@ -195,6 +205,20 @@ fn decode_cached(shared: &Shared, job: &Job) -> Option<Arc<RgbaImage>> {
         g.cache.remove(0);
     }
     Some(img)
+}
+
+fn ensure_downloaded(path: &std::path::Path, remote: &Remote) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    let bytes = crate::net::get_bytes(&remote.url, &remote.headers)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    // Write to a temporary name first so a half-written file is never decoded.
+    let tmp = path.with_extension("part");
+    std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Crops the tile's rows out of the full-size page and resizes them to the

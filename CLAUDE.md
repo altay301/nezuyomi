@@ -27,4 +27,4 @@ Full plan and technology choices: @PLAN.md
 
 ## Current phase
 
-Phase 0: vertical scrolling prototype (see PLAN.md).
+Phase 1: MVP (JS extension engine, first source, search, details, chapters, reader, library, progress). Phase 0 is done and measured (see PLAN.md → Phase 0 findings).

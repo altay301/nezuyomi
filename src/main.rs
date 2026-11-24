@@ -1,9 +1,17 @@
 mod app;
+mod browse;
+mod covers;
+mod db;
+mod details;
 mod ext;
 mod library;
 mod loader;
+mod local;
 mod net;
+mod pages;
+mod paths;
 mod probe;
+mod reader;
 mod source;
 mod stats;
 mod strip;

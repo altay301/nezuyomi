@@ -106,13 +106,20 @@ impl Stats {
 /// Starts collecting once the window has a surface (and so a frame clock).
 pub fn install(window: &gtk::ApplicationWindow, label: &gtk::Label) -> Rc<Stats> {
     let stats = Rc::new(Stats::default());
-    let (s, label) = (stats.clone(), label.clone());
-    window.connect_realize(move |w| {
-        let Some(clock) = w.surface().map(|surface| surface.frame_clock()) else { return };
-        let (s, label) = (s.clone(), label.clone());
-        let s2 = s.clone();
-        clock.connect_update(move |_| s2.on_update());
-        clock.connect_after_paint(move |c| s.on_frame(c.frame_time(), &label));
-    });
+    let hook = {
+        let (s, label) = (stats.clone(), label.clone());
+        move |w: &gtk::ApplicationWindow| {
+            let Some(clock) = w.surface().map(|surface| surface.frame_clock()) else { return };
+            let (s, label) = (s.clone(), label.clone());
+            let s2 = s.clone();
+            clock.connect_update(move |_| s2.on_update());
+            clock.connect_after_paint(move |c| s.on_frame(c.frame_time(), &label));
+        }
+    };
+    if window.is_realized() {
+        hook(window);
+    } else {
+        window.connect_realize(move |w| hook(w));
+    }
     stats
 }

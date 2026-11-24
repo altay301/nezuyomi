@@ -11,7 +11,7 @@
 //!   visible tiles are re-rendered at 2x resolution in the background.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -40,6 +40,7 @@ const KEEP_SCREENS: f64 = 5.0;
 /// High-resolution (zoomed) tiles only within this distance.
 const NEAR_SCREENS: f64 = 1.0;
 const MAX_ZOOM: f64 = 3.0;
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
 const WORKER_THREADS: usize = 2;
 
 #[derive(Default)]
@@ -105,7 +106,8 @@ struct State {
     pages: Vec<PageInfo>,
     layout: Layout,
     tex: Vec<Option<TileTex>>,
-    failed: HashSet<usize>,
+    /// Tiles whose decode/download failed, with the time to retry after a pause.
+    failed: HashMap<usize, Instant>,
     generation: u64,
     /// (request range, near range, wanted quality) of the last refresh.
     last_key: Option<((usize, usize), (usize, usize), u8)>,
@@ -139,6 +141,8 @@ mod imp {
         pub fling: Cell<(f64, f64)>,
         pub fling_tick: RefCell<Option<gtk::TickCallbackId>>,
         pub zoom_start: Cell<f64>,
+        /// Scroll position (0–1 of the chapter) to restore once the layout exists.
+        pub pending_fraction: Cell<Option<f64>>,
     }
 
     impl Default for StripView {
@@ -158,6 +162,7 @@ mod imp {
                 fling: Default::default(),
                 fling_tick: Default::default(),
                 zoom_start: Cell::new(1.0),
+                pending_fraction: Cell::new(None),
             }
         }
     }
@@ -237,10 +242,17 @@ mod imp {
             let px = |v: f64| ((v * scale).round() / scale) as f32;
             let x0 = px(-hv);
             let x1 = px(st.layout.width * z - hv);
+            // A tile's bottom edge is the *same value* as the next tile's top
+            // edge; computing both separately could round them differently and
+            // leave a one-pixel gap.
+            let n = st.layout.tiles.len();
+            let top_edge = |i: usize| -> f32 {
+                let t = &st.layout.tiles[i];
+                if i < n { px(t.y * z - vv) } else { px((st.layout.tiles[n - 1].y + st.layout.tiles[n - 1].h) * z - vv) }
+            };
             for i in first..last {
                 let Some(tex) = &st.tex[i] else { continue };
-                let t = &st.layout.tiles[i];
-                let (y0, y1) = (px(t.y * z - vv), px((t.y + t.h) * z - vv));
+                let (y0, y1) = (top_edge(i), top_edge(i + 1));
                 snapshot.append_scaled_texture(
                     &tex.texture,
                     gsk::ScalingFilter::Linear,
@@ -349,7 +361,11 @@ mod imp {
                 }
                 st.layout.total_height
             };
-            self.configure_adjustments(Some((hv, ratio * total * z)));
+            let target_v = match self.pending_fraction.take() {
+                Some(f) => f.clamp(0.0, 1.0) * (total * z - obj.height() as f64).max(0.0),
+                None => ratio * total * z,
+            };
+            self.configure_adjustments(Some((hv, target_v)));
             obj.queue_draw();
         }
 
@@ -394,7 +410,7 @@ mod imp {
             for i in req.0..req.1 {
                 let need = if (near.0..near.1).contains(&i) { want_q } else { 1 };
                 let have = st.tex[i].as_ref().map_or(0, |t| t.q);
-                if have >= need || st.failed.contains(&i) {
+                if have >= need || st.failed.get(&i).is_some_and(|t| t.elapsed() < RETRY_AFTER) {
                     continue;
                 }
                 let t = &st.layout.tiles[i];
@@ -421,6 +437,7 @@ mod imp {
                         generation,
                         q,
                         path: st.pages[page].path.clone(),
+                        remote: st.pages[page].remote.clone(),
                         tiles: tiles.into_iter().map(|(_, t)| t).collect(),
                     }
                 })
@@ -442,7 +459,8 @@ mod imp {
                 return;
             }
             if r.rgb.is_empty() {
-                st.failed.insert(r.tile);
+                st.failed.insert(r.tile, Instant::now());
+                st.last_key = None; // let the next refresh retry after the pause
                 return;
             }
             if !(st.keep.0..st.keep.1).contains(&r.tile) || st.tex[r.tile].as_ref().is_some_and(|t| t.q >= r.q) {
@@ -452,7 +470,7 @@ mod imp {
             let texture = gdk::MemoryTexture::new(
                 r.w as i32,
                 r.h as i32,
-                gdk::MemoryFormat::R8g8b8a8Premultiplied,
+                gdk::MemoryFormat::R8g8b8x8,
                 &bytes,
                 r.w as usize * 4,
             );
@@ -577,10 +595,11 @@ impl StripView {
         glib::Object::new()
     }
 
-    /// Replaces the content and scrolls to the top.
-    pub fn set_pages(&self, pages: Vec<PageInfo>) {
+    /// Replaces the content and scrolls to `start_fraction` (0.0 = top).
+    pub fn set_pages(&self, pages: Vec<PageInfo>, start_fraction: f64) {
         let imp = self.imp();
         imp.stop_fling();
+        imp.pending_fraction.set(Some(start_fraction));
         imp.state.borrow_mut().pages = pages;
         imp.zoom.set(1.0);
         imp.want_q.set(1);
