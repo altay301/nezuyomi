@@ -149,27 +149,27 @@ mod tests {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("nezuyomi-local-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let series = root.join("Teppeki Honeymoon");
+        let series = root.join("Ironclad Honeymoon");
         std::fs::create_dir_all(&series).unwrap();
         std::fs::create_dir_all(root.join("Nyaa").join("Other")).unwrap();
-        make_zip(&series.join("Teppeki Honeymoon v02 (2026) (Digital).cbz"), &[("1.png", png(6, 9)), ("2.png", png(6, 9))]);
-        make_zip(&series.join("Teppeki Honeymoon v01 (2025) (Digital).cbz"), &[("a.png", png(4, 4))]);
+        make_zip(&series.join("Ironclad Honeymoon v02 (2026) (Digital).cbz"), &[("1.png", png(6, 9)), ("2.png", png(6, 9))]);
+        make_zip(&series.join("Ironclad Honeymoon v01 (2025) (Digital).cbz"), &[("a.png", png(4, 4))]);
         std::fs::write(series.join("notes.txt"), "x").unwrap();
         // SAFETY: serialized by LOCK with the other test that sets the cache location.
         unsafe { std::env::set_var("XDG_CACHE_HOME", root.join("cache")) };
 
         let src = LocalSource::new("local", "Local", root.clone(), &["Nyaa", "cache"]);
         let listed = src.popular(1).unwrap().items;
-        assert_eq!(listed.iter().map(|m| m.title.as_str()).collect::<Vec<_>>(), vec!["Teppeki Honeymoon"], "Nyaa and the cache folder are not series");
+        assert_eq!(listed.iter().map(|m| m.title.as_str()).collect::<Vec<_>>(), vec!["Ironclad Honeymoon"], "Nyaa and the cache folder are not series");
         assert!(listed[0].cover.is_some(), "cover comes from the first volume");
 
-        let ch = src.chapters("Teppeki Honeymoon").unwrap();
+        let ch = src.chapters("Ironclad Honeymoon").unwrap();
         assert_eq!(ch.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["v01 (2025) (Digital)", "v02 (2026) (Digital)"]);
         let pages = src.pages(&ch[1].id).unwrap();
         assert_eq!(pages.len(), 2);
         assert_eq!((pages[0].width, pages[0].height), (6, 9));
         assert!(Path::new(&pages[0].url).exists());
-        assert!(src.pages("Teppeki Honeymoon/nope").is_err());
+        assert!(src.pages("Ironclad Honeymoon/nope").is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

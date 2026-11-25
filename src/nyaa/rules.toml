@@ -17,7 +17,7 @@ patterns = [
   '^(?P<title>.+?) v(?P<vol>\d+)(?:-(?P<vol_end>\d+))?(?:,\s*(?P<ch>\d+)(?:-(?P<ch_end>\d+))?)?(?:\s|$)',
   # file names without the series title: "Volume 01 - Chapter name", "Vol. 3", "Volume 27f"
   '(?i)^vol(?:ume)?\.?\s*(?P<vol>\d+)(?:-(?P<vol_end>\d+))?',
-  # ... and with something in front: "Altercolor. Vol26-Ch105"
+  # ... and with something in front: "Altershade. Vol26-Ch105"
   '(?i)\bvol(?:ume)?\.?\s*(?P<vol>\d+)',
   # no volume number at all: the whole run or a one-shot, "Series (2017-2026) (Digital) ..."
   '^(?P<title>.+?) [\(\[]',
@@ -25,6 +25,10 @@ patterns = [
 # When one release exists in several variants, which tag wins (substring, in order).
 prefer_variant = []
 
-[uploader.UploaderF]
-# UploaderF posts "(UploaderF-Empire)" and "(UploaderF-repack)" of the same release.
-prefer_variant = ["Empire", "repack"]
+# Per-uploader overrides go in tables named after the uploader, for example:
+#
+# [uploader.exampleuploader]
+# # "(exampleuploader-Crown)" and "(exampleuploader-repack)" are two variants of one release;
+# # the first tag that matches wins.
+# prefer_variant = ["Crown", "repack"]
+# # patterns, accept_ext and reject_title can be overridden per uploader as well.

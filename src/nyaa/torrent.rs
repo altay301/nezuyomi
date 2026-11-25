@@ -174,16 +174,16 @@ mod tests {
         let mut t = b"d8:announce3:foo4:infod5:filesl".to_vec();
         t.extend(files);
         t.extend(b"e4:name".iter());
-        t.extend(bstr("Teppeki Honeymoon"));
+        t.extend(bstr("Ironclad Honeymoon"));
         t.extend(b"ee".iter());
         t
     }
 
     #[test]
     fn reads_a_folder_torrent() {
-        let t = multi(&[(&["Teppeki Honeymoon v01 (2025) (Digital) (UploaderE).cbz"], 100), (&["Teppeki Honeymoon v02 (2026).cbz"], 250)]);
+        let t = multi(&[(&["Ironclad Honeymoon v01 (2025) (Digital) (PixelScans).cbz"], 100), (&["Ironclad Honeymoon v02 (2026).cbz"], 250)]);
         let info = read(&t).unwrap();
-        assert_eq!(info.name, "Teppeki Honeymoon");
+        assert_eq!(info.name, "Ironclad Honeymoon");
         assert_eq!(info.files.len(), 2);
         assert_eq!(info.total_size(), 350);
         assert!(info.files[1].path.ends_with("v02 (2026).cbz"));
@@ -191,18 +191,18 @@ mod tests {
 
     #[test]
     fn reads_a_single_file_torrent() {
-        let t = format!("d4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
+        let t = format!("d4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Dreams.cbz")).unwrap()).into_bytes();
         let info = read(&t).unwrap();
-        assert_eq!(info.files, vec![TorrentFile { path: "Visions.cbz".into(), size: 42 }]);
+        assert_eq!(info.files, vec![TorrentFile { path: "Dreams.cbz".into(), size: 42 }]);
     }
 
     #[test]
     fn info_hash_is_the_sha1_of_the_info_dictionary() {
-        let t = format!("d8:announce3:foo4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
-        // sha1(b"d6:lengthi42e4:name11:Visions.cbze"), computed independently with Python's hashlib
-        assert_eq!(info_hash(&t).unwrap(), "a51f3c07e7474f147484b1a0f11315d864331750");
+        let t = format!("d8:announce3:foo4:infod6:lengthi42e4:name{}ee", String::from_utf8(bstr("Dreams.cbz")).unwrap()).into_bytes();
+        // sha1(b"d6:lengthi42e4:name10:Dreams.cbze"), computed independently with Python's hashlib
+        assert_eq!(info_hash(&t).unwrap(), "c523ab77cd0aca4c607197243d4a6a7b7ab7381f");
         // key order and extra keys around "info" do not matter
-        let t2 = format!("d4:infod6:lengthi42e4:name{}e7:comment1:xe", String::from_utf8(bstr("Visions.cbz")).unwrap()).into_bytes();
+        let t2 = format!("d4:infod6:lengthi42e4:name{}e7:comment1:xe", String::from_utf8(bstr("Dreams.cbz")).unwrap()).into_bytes();
         assert_eq!(info_hash(&t2).unwrap(), info_hash(&t).unwrap());
         assert!(info_hash(b"d3:foo3:bare").is_err());
         assert!(info_hash(b"garbage").is_err());

@@ -188,31 +188,23 @@ If a site returns a challenge page, the app opens a small WebKitGTK window and *
 
 `~/Manga/<Series>/<Chapter>/` folders and CBZ files show up in the library through the same `Source` interface (also handy for prototype testing).
 
-### First sources (reviewed 2026-11-24)
+### Sources
 
-**1. example.com — first extension.** Clean JSON API (observed in a browser):
-- `GET /api/search?q=…` → `{ manga_list: [{ id, title, photo, … }] }` (parameter names to be verified during implementation)
-- `GET /api/manga/{id}` → manga details (JSON)
-- `GET /api/manga/{id}/chapters/list` → `[{ id, chapter_number, chapter_title, language, group_name, date_added, page_count }]`
-- `GET /api/chapters/{chapterId}/images` → `{ chapter: { is_longstrip, … }, images: [{ url: "/chapters/…/001.webp", w, h }] }`
-- `is_longstrip` can tell webtoon from manga; images are WebP
-- `w`/`h` can be 0 → read the size from the WebP header (first few hundred bytes); enough for `StripView`
-- Risk: the home page returned 403 to an automated (non-browser) client → test the API endpoints with `curl`/`reqwest` on the Yoga; fall back to the WebView cookie flow if needed
+The app ships with **no** site extensions. It starts with the Local and Nyaa sources only; users install extensions themselves by dropping `*.js` files into `~/.local/share/nezuyomi/extensions/` (symlinks are followed, a later file with the same `id` replaces an earlier one). The repository documents the extension API (above) and nothing about specific sites.
 
-**2. SiteB — second (blocked, see `extensions/experimental/README.md`).** *Update 2026-11-24:* example.org has no challenge for `curl`, but rejects the app's TLS fingerprint, its image host rejects every request, and its pages are JPEG XL. example.org still shows the original challenge.
+A minimal example against a made-up site:
 
-Original note: **example.org** Shows a Cloudflare challenge page ("Just a moment…") on load that did not pass by itself in an embedded browser. Needs the Cloudflare window flow (the user passes the check); structure to be reviewed after that.
+```js
+export default {
+  id: "example", name: "Example", lang: "en", version: 1,
+  baseUrl: "https://example.com", domains: ["example.com"],
+  async popular(page) { /* -> { items: [{ id, title, cover }], hasNext } */ },
+  async getChapters(id) { /* -> [{ id, name, number }] */ },
+  async getPages(chapterId) { /* -> [{ url, headers? }] */ },
+};
+```
 
-### ExtRepo (Mihon extension repository) — reference source
-
-- https://ExtRepo.github.io/extensions/ — ~1700 extensions / ~2800 sources; source code: `github.com/ExtRepo/extensions-source` (Kotlin)
-- **Used as a porting reference.** API endpoints, headers, selectors and rate limits for each site are already worked out; check the Kotlin code there before writing a JS extension.
-- Both candidate sites have extensions there:
-  - `src/all/examplesite` (ExampleSite)
-  - `src/all/SiteB` (SiteB, v1.6.42) — API on `example.org`; requests need an `x-integrity-token` header, fetched via `GET {baseUrl}/api/integrity` and cached until its `exp`. Easy to do in a JS extension.
-- Templates under `lib-multisrc` (Madara, etc.) get ported once to our template system → dozens of sites at once
-- License: the source repository's license is credited in ported extensions (check `LICENSE` before porting)
-- Note: the repository moved to a new format (`index.pb`, Mihon 0.21.3+); compatibility with the Suwayomi bridge must be verified separately
+Page sizes: when an API gives `w`/`h` they are used; when they are 0 or missing the size is read from the first bytes of the image (header range request), enough for `StripView`.
 
 ### Later: Suwayomi bridge
 
@@ -228,8 +220,8 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 1. **MVP** — JS extension engine + first source, search, manga details, chapter list, reader, library, progress saving
 2. Extension repository, downloads/offline, history, update checks
 3. Suwayomi bridge, categories, backup, tracking (AniList/MAL)
-4. **Anime support** (inspired by anime-cli, without calling it):
-   - anime-cli is an interactive shell script (fzf menus) → wrapping it as a subprocess is fragile; the same logic is written as an **anime extension** instead
+4. **Anime support:**
+   - Wrapping an interactive shell script as a subprocess is fragile; anime sites are handled as **anime extensions** instead
    - Anime type in the extension interface: `search`, `getAnime`, `getEpisodes`, `getVideos(episodeId)` → `[{ url, quality, headers?, subtitles? }]`
    - Playback: **mpv** (already on Fedora), full screen, `--hwdec=vaapi` → hardware decoding on UHD 620, low heat
    - Playback position read via mpv's JSON IPC socket → resume, watched markers, next episode
@@ -247,7 +239,7 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 
 - **Extension engine:** `src/ext/` — QuickJS (`rquickjs`) on its own low-priority thread per extension, started on first use and dropped after 60 s idle. 32 MB memory limit, 30 s call timeout, requests only to the extension's `domains`. HTML via `scraper` behind `doc.select/selectFirst/text/attr/html` handles.
 - **HTTP is blocking (`ureq`, rustls), not `tokio`/`reqwest`:** every network call already runs on a background thread, so an async runtime would only add binary size and wake-ups.
-- **Bundled extension:** `extensions/ExampleSite.js` (endpoints verified against the live API: `/api/search?search=&sortBy=&page=`, `/api/manga/{id}`, `/api/manga/{id}/chapters/list`, chapters with `source: "user"` use `/api/uploads/{id}/images`, others `/api/chapters/{id}/images`; images need a `Referer`). Extra extensions: drop `*.js` into `~/.local/share/nezuyomi/extensions/` (same `id` overrides a bundled one). Test one without the UI: `nezuyomi --probe <file.js> [query]`, `--probe-raw <file.js> <method> '<json args>'`.
+- **Extensions:** none are bundled. Drop `*.js` into `~/.local/share/nezuyomi/extensions/` (a later file with the same `id` replaces an earlier one). Test one without the UI: `nezuyomi --probe <file.js> [query]`, `--probe-raw <file.js> <method> '<json args>'`.
 - **Local source:** `~/Manga/<Series>/<Chapter>/` (or the folder given as the first argument) appears as the "Local" source.
 - **Data:** SQLite at `~/.local/share/nezuyomi/library.db` (library, per-chapter progress, image-size cache) on a dedicated DB thread; reader progress is flushed at most every 2 s. Downloaded pages and covers are cached under `~/.cache/nezuyomi/` and trimmed to 1 GB at start-up.
 - **Page sizes:** taken from the API when present, else read from the first 16 KB of each image (HTTP range request) and cached, so the whole chapter is laid out before any pixel is decoded.
@@ -259,9 +251,8 @@ Suwayomi-Server (Java) runs as a separate process only when the user enables it;
 
 - **Phase 2 reduced to downloads.** Extension repository, history, update checks and the extra places/menu bar are not planned for now.
 - **Downloads (done):** `src/downloads.rs`. One low-priority worker, one chapter at a time, pages sequentially with a 60 ms pause. Files in `~/.local/share/nezuyomi/downloads/<source>/<series>/<chapter>/` plus a `pages.json` manifest. The queue survives restarts. Finished chapters open from disk, and the series page falls back to stored details when the source is unreachable (verified in a network-less namespace with `unshare -rn`). The sidebar has a "Downloads" place.
-- **SiteB (blocked):** see `extensions/experimental/README.md`.
 - **Phase 3 skipped.** The Suwayomi bridge needs a JVM process (typically 300–600 MB RAM, seconds of start-up, constant GC work), which conflicts with the low-heat goal. Revisit only if a needed source exists nowhere else. Categories, backup and tracking are also postponed.
-- **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). `extensions/anime.example` is ported from anime-cli (search page → episode list API → server list API → EmbedHost embed → config blob `base64(json XOR "otaku-embed-v1")` → HLS master playlist). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
+- **Phase 4 (anime, done):** extensions declare `type: "anime"` and implement `popular/latest/search/getAnime/getEpisodes/getVideos`; the same `Source` trait serves both (`kind()`, `videos()`). Playback is mpv with `--hwdec=vaapi` (measured: 5.1 s of CPU for 10 s of 1080p versus 11.8 s in software), a full-screen mpv window, and progress read over mpv's JSON IPC socket every 5 s (resume with `--start=<percent>%`, watched at 90 %). The sidebar lists manga and anime sources separately. Not done: the triple-tap panel inside mpv, quality/sub-dub settings (Sub is played, Dub if it is the only stream is not special-cased), anime downloads.
 
 ## Nyaa torrent downloads (Phase 2 addition, implemented)
 
@@ -275,24 +266,24 @@ Non-goals: searching or browsing Nyaa in the UI, running our own torrent engine,
 
 ### What the research showed (2026-11-25, real data)
 
-- **RSS:** `https://nyaa.si/?page=rss&u=<uploader>&c=3_0` filters by uploader and category on the server. Items carry `title`, `link` (the `.torrent`), `guid` (view page), `pubDate`, `nyaa:infoHash`, `nyaa:size`, `nyaa:seeders`, `nyaa:categoryId` — **no uploader field**, so the uploader is known only from which feed an item came from. A feed returns the newest 75 items. `q=<phrase>` can be combined with `u=` (verified: `u=UploaderE&q=shangri`). The feed is cached server-side for 5 minutes (`cache-control: max-age=300`) and answers `If-Modified-Since` with `304`.
-- **Categories:** `3_0` = all of Literature, `3_1` English-translated, `3_2` Non-English-translated, `3_3` Raw. The six uploaders post almost only `3_1`.
-- **Our HTTP client works** for both the RSS feeds and `.torrent` downloads (no Cloudflare/TLS-fingerprint problem, unlike SiteB).
-- **Not everything in Literature is manga.** UploaderC's feed is mostly `[Audiobook]` and `.epub` (light novels); UploaderF posts `.epub` too. Only archives are wanted.
-- **Torrent layouts seen:** a single `.cbz` as the torrent root (UploaderA, UploaderF), or a folder with one `.cbz` per volume (UploaderB, UploaderD, UploaderE). One torrent can hold many volumes (`v01-27`, 15 GiB), and a later torrent often supersedes an earlier one (`v01-13` then `v01-14`), so "new volume" detection must work per file, not per torrent.
-- **Title/file name shapes** (all real, used as test fixtures later):
+- **RSS:** `https://nyaa.si/?page=rss&u=<uploader>&c=3_0` filters by uploader and category on the server. Items carry `title`, `link` (the `.torrent`), `guid` (view page), `pubDate`, `nyaa:infoHash`, `nyaa:size`, `nyaa:seeders`, `nyaa:categoryId` — **no uploader field**, so the uploader is known only from which feed an item came from. A feed returns the newest 75 items. `q=<phrase>` can be combined with `u=` (verified: `u=PixelScans&q=example`). The feed is cached server-side for 5 minutes (`cache-control: max-age=300`) and answers `If-Modified-Since` with `304`.
+- **Categories:** `3_0` = all of Literature, `3_1` English-translated, `3_2` Non-English-translated, `3_3` Raw. Most uploaders post almost only `3_1`.
+- **Our HTTP client works** for both the RSS feeds and `.torrent` downloads (no Cloudflare/TLS-fingerprint problem).
+- **Not everything in Literature is manga.** Mapleton's feed is mostly `[Audiobook]` and `.epub` (light novels); tanuki posts `.epub` too. Only archives are wanted.
+- **Torrent layouts seen:** a single `.cbz` as the torrent root (Zenith, tanuki), or a folder with one `.cbz` per volume (Brightfox, bluelark, PixelScans). One torrent can hold many volumes (`v01-27`, 15 GiB), and a later torrent often supersedes an earlier one (`v01-13` then `v01-14`), so "new volume" detection must work per file, not per torrent.
+- **Title/file name shapes** (invented names with the same shapes as real releases; used as test fixtures):
 
 | Example | Shape |
 |---|---|
-| `Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)` | title, volume range, year range, `(Digital)`, `(Group)` |
-| `Ultimate Exorcist Kiyoshi v01,009-090 (2024-2026) (Digital) (UploaderA)` | volumes plus loose chapters after a comma |
-| `Queen's Quality (2017-2026) (Digital) (UploaderA)` | no volume number at all (whole run or one-shot) |
-| `The God-Slaying Demon King 001-021 as v01-05 (Digital-Compilation) (Square Enix) (UploaderE)` | chapters compiled into volumes, publisher in parentheses |
-| `Weekly Viz, ShonenJump and MangaPlus Chapter Updates - Week 47 2026 (Digital) (UploaderB)` | a pack of many series, not one series |
-| `Unnamed Memory v01-08 (2022-2026) (Digital) (GroupG, GroupH)` | several release groups (UploaderD posts as "GroupH") |
-| `Reincarnated Onmyoji v01-02 [Hanashi Media] [UpC]` | bracket style (UploaderC, UploaderF) |
-| `Mitama Security - Spirit Busters (2021) (Digital) (UploaderF-repack)` / `(UploaderF-Empire)` | two variants of the same release |
-| inside the torrent: `Teppeki Honeymoon v02 (2026) (Digital) (UploaderE).cbz` | one file per volume |
+| `Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)` | title, volume range, year range, `(Digital)`, `(Group)` |
+| `Grand Summoner Haruto v01,009-090 (2024-2026) (Digital) (Zenith)` | volumes plus loose chapters after a comma |
+| `Empress Quality (2017-2026) (Digital) (Zenith)` | no volume number at all (whole run or one-shot) |
+| `The Star-Slaying Dragon King 001-021 as v01-05 (Digital-Compilation) (Acme Comics) (PixelScans)` | chapters compiled into volumes, publisher in parentheses |
+| `Weekly Foo, Bar and Baz Chapter Updates - Week 47 2026 (Digital) (Brightfox)` | a pack of many series, not one series |
+| `Nameless Echo v01-08 (2022-2026) (Digital) (Irontail, Lark)` | several release groups (bluelark posts as "Lark") |
+| `Reborn Alchemist v01-02 [Hana Press] [Maple]` | bracket style (Mapleton, tanuki) |
+| `Hollow Guard - Ghost Hunters (2021) (Digital) (tanuki-repack)` / `(tanuki-Crown)` | two variants of the same release |
+| inside the torrent: `Ironclad Honeymoon v02 (2026) (Digital) (PixelScans).cbz` | one file per volume |
 
 ### Architecture
 
@@ -315,7 +306,7 @@ Dependencies: `quick-xml` for RSS, `regex`, `zip` for CBZ/ZIP; CBR/7z through th
 
 ### Data model (SQLite, same database file)
 
-- `nyaa_uploaders(name PRIMARY KEY, enabled, category DEFAULT '3_1')` — seeded with UploaderA, UploaderB, UploaderC, UploaderD, UploaderE, UploaderF; add/remove/disable in Settings.
+- `nyaa_uploaders(name PRIMARY KEY, enabled, category DEFAULT '3_1')` — starts empty; the user adds, removes and disables uploaders in Settings.
 - `nyaa_releases(info_hash PRIMARY KEY, uploader, title, size, pub_date, link, state, link_id, qbit_hash, first_seen)` — `state`: `seen`, `matched`, `queued`, `downloading`, `done`, `skipped`, `failed`. Dedup key is the info hash.
 - `nyaa_links(id, source, manga_id, uploader, query, mode, include_regex, exclude_regex, folder)` — one row per linked series: the library series (`source`+`manga_id`), the uploader, the search phrase, the mode (auto-download / notify only) and the local folder the volumes go to.
 - `nyaa_volumes(link_id, volume, file_path, info_hash)` — what is already on disk; filled from finished torrents and from a folder scan, so manually added files count too.
@@ -331,7 +322,7 @@ Dependencies: `quick-xml` for RSS, `regex`, `zip` for CBZ/ZIP; CBR/7z through th
 - Rules live in `rules.toml` (defaults embedded in the binary, an optional user copy under `~/.config/nezuyomi/` overrides it). Each uploader has an ordered list of regexes with named groups (`title`, `vol`, `vol_end`, `ch`, `ch_end`, `year`, `group`, `publisher`), plus filters:
 
 ```toml
-[uploader.UploaderA]
+[uploader.Zenith]
 accept_ext   = ["cbz", "zip", "cbr", "7z", "rar"]
 reject_title = ['\[Audiobook\]', 'Chapter Updates - Week']
 patterns = [
@@ -339,13 +330,13 @@ patterns = [
   '^(?P<title>.+?) (?P<ch>\d+)-(?P<ch_end>\d+) as v(?P<vol>\d+)-(?P<vol_end>\d+) \(',
   '^(?P<title>.+?) \(\d{4}',          # no volume: whole run / one-shot
 ]
-[uploader.UploaderF]
-prefer_variant = ["Empire", "repack"]  # which of two variants of one release to take
+[uploader.tanuki]
+prefer_variant = ["Crown", "repack"]  # which of two variants of one release to take
 ```
 
 - A parsed release yields a title plus a set of volume numbers and chapter ranges. Titles are normalised (case, punctuation, `&`/`and`, leading `The`) before comparing with the link's phrase, which is an include phrase plus optional exclude regex.
 - The same rules parse **file names inside a torrent** (one volume per `.cbz`), which is what decides what to download.
-- Unit tests are table-driven from the real titles above and the file names seen inside the torrents; every rule change must keep them green.
+- Unit tests are table-driven from the titles above and the file names seen inside the torrents; every rule change must keep them green.
 
 ### Link once, find new volumes automatically (requirement 3)
 
@@ -374,7 +365,7 @@ On a library series: **"Link to Nyaa…"** asks for an uploader (dropdown of the
 - **Local source extension:** `LocalSource` learns that a series folder may contain archives: each `.cbz/.zip/.cbr/.rar/.7z` is one "chapter" (named after the volume, ordered by parsed volume number), next to the existing folder-per-chapter layout. These series appear in the Library with a "downloaded" mark and in the Downloads place.
 - **Reading:** the first open extracts the volume's image entries (natural order, images only) into the page cache `~/.cache/nezuyomi/archives/<hash>/` on a low-priority thread, writes a `pages.json` like finished downloads do, and the existing StripView pipeline takes over unchanged (sizes from image headers, tiling, progress saving). ZIP/CBZ via the `zip` crate; RAR/CBR/7z via `7z x -o<dir>`. Extracted volumes count towards the existing 1 GiB cache trimming (oldest first); archives are never modified.
 - **Safety:** entry names are sanitised (no `..`, no absolute paths), only image extensions are written, and entry count/size caps stop zip bombs; the external tool runs with a timeout and low priority.
-- **Series page:** an online series (e.g. ExampleSite) cannot be merged chapter-by-chapter with volume files (different numbering). The link therefore creates/uses a **separate local series** and the linked library entry gets a button "Volumes on disk (N)" that opens it.
+- **Series page:** an online series cannot be merged chapter-by-chapter with volume files (different numbering). The link therefore creates/uses a **separate local series** and the linked library entry gets a button "Volumes on disk (N)" that opens it.
 
 ### UI
 
@@ -414,13 +405,13 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 
 
 1. **Category scope:** `3_0` (all Literature incl. Raw and Non-English) or only `3_1` English-translated? *Proposed: `3_1`.*
-2. **Non-manga files:** skip EPUB/audiobooks/PDF entirely (UploaderC and UploaderF post many)? *Proposed: skip.*
+2. **Non-manga files:** skip EPUB/audiobooks/PDF entirely (Mapleton and tanuki post many)? *Proposed: skip.*
 3. **Auto vs notify:** new volumes of a linked series are queued automatically, or shown first for one tap? And the size cap per torrent. *Proposed: auto for linked series, cap 4 GiB, larger ones need one tap.*
 4. **Download folder:** category save path `~/Manga/Nyaa/` with a sub-folder per series. *Proposed as above.*
 5. **Seeding:** keep seeding until ratio 1.0 / 24 h, or stop immediately after completion? *Proposed: ratio 1.0 or 24 h, whichever first.*
 6. **Power policy wording:** pause only when on battery **and** in tablet mode; resume when plugged in **or** tablet mode ends — correct? And is "only while the app is open" acceptable?
 7. **Linked series model:** separate local series cross-linked to the online entry (proposed) versus trying to merge volumes into the online series page.
-8. **Variants and packs:** for UploaderF's repack/Empire pairs which variant wins; skip UploaderB's weekly chapter packs and "Digital-Compilation" releases? *Proposed: prefer Empire, skip weekly packs, include compilations.*
+8. **Variants and packs:** for tanuki's repack/Crown pairs which variant wins; skip Brightfox's weekly chapter packs and "Digital-Compilation" releases? *Proposed: prefer Crown, skip weekly packs, include compilations.*
 9. **qBittorrent start-up:** show the setup steps only, or also launch `qbittorrent` when it is not running? Web UI port (8080?).
 10. **Poll interval:** default 60 minutes OK?
 
@@ -433,7 +424,7 @@ No timers while idle; RSS ≤ 6 small requests per hour with `304`s; qBittorrent
 - **Safety nets that exist and are tested:** only our category/hashes are ever passed to qBittorrent (`all` and malformed hashes are refused; a torrent in another category and one the user stopped by hand survive stop/start/policy calls untouched); the downloaded `.torrent`'s info hash must equal the feed's; torrent files, archive entries and folder names are sanitised; the torrent URL must be a `nyaa.si/download/*.torrent` link; size cap, free-space check and per-torrent file selection (owned volumes, EPUB and other series are set to priority 0).
 - **Where things are:** `src/nyaa/` (`rules` + `rules.toml`, `feed`, `matcher`, `torrent`, `qbit`, `secret`, `store`, `sync`, `service`, `power`), `src/nyaa_ui.rs` (the Nyaa place and the link window), `src/archive.rs` (CBZ/ZIP in-process, CBR/RAR/7z through `7z`), `LocalSource` (archives as chapters; a second instance "Nyaa").
 - **Testing tools:** `nezuyomi --nyaa-probe` classifies the live feeds; `tools/qbt-test-instance.sh start|stop` runs a throw-away headless qBittorrent (own profile and port); the integration tests marked `#[ignore]` use it: `QBT_TEST_PORT=18080 QBT_TEST_DIR=<dir> cargo test --release qbit_isolated nyaa_end_to_end power_policy_isolated -- --ignored`.
-- **Editions (colored vs black & white), added after a real report:** a colored release has the same volume numbers as the standard one, so volume bookkeeping per series made it look "already owned" (and its files, `Volume 01 - Title.cbz`, carry no series title and no `v01`, so they were not understood at all). Now a release is classified as `standard` or `colored` from its title (the word *Colored*/*Colour*, or *Full Color*/*Digital Colored*, standing alone; a hyphenated title word such as "Seven-Colored" does not count), a link has an edition, and a series can be linked once per edition: the colored link downloads into its own folder `<Series> (Colored)` and keeps its own volume list. File names without the series title ("Volume 01 - …", "Vol. 3", "Altercolor. Vol26-Ch105") are understood and inherit the match of their torrent. Databases from earlier versions are upgraded in place, and releases that were skipped as "nothing new" or "other variant" are looked at again once.
+- **Editions (colored vs black & white), added after a real report:** a colored release has the same volume numbers as the standard one, so volume bookkeeping per series made it look "already owned" (and its files, `Volume 01 - Title.cbz`, carry no series title and no `v01`, so they were not understood at all). Now a release is classified as `standard` or `colored` from its title (the word *Colored*/*Colour*, or *Full Color*/*Digital Colored*, standing alone; a hyphenated title word such as "Seven-Colored" does not count), a link has an edition, and a series can be linked once per edition: the colored link downloads into its own folder `<Series> (Colored)` and keeps its own volume list. File names without the series title ("Volume 01 - …", "Vol. 3", "Altershade. Vol26-Ch105") are understood and inherit the match of their torrent. Databases from earlier versions are upgraded in place, and releases that were skipped as "nothing new" or "other variant" are looked at again once.
 - **Not done / limits:** the power policy runs only while the app is open; no per-series custom exclude field in the link window (the column exists in the database, the isolated run used it); series linked in the library are matched by phrase only (no cover/ID matching); CBR/7z covers are not generated (only CBZ), such series show a placeholder until a volume is opened.
 
 ## Development and testing

@@ -70,7 +70,7 @@ mod tests {
     use crate::nyaa::torrent::TorrentFile;
 
     fn rules() -> Rules {
-        Rules::from_toml(include_str!("rules.toml"), None).unwrap()
+        Rules::from_toml(include_str!("rules.toml"), Some("[uploader.tanuki]\nprefer_variant = [\"Crown\", \"repack\"]\n")).unwrap()
     }
 
     fn set(v: &[u32]) -> HashSet<u32> {
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn a_superseding_torrent_only_adds_the_missing_volume() {
-        let p = parse("UploaderA", "Prince Freya v01-14 (2020-2026) (Digital) (UploaderA)");
+        let p = parse("Zenith", "Duke Fenrir v01-14 (2020-2026) (Digital) (Zenith)");
         assert_eq!(new_volumes(&p, &set(&(1..=13).collect::<Vec<_>>()), &set(&[])), vec![14]);
         assert!(new_volumes(&p, &set(&(1..=14).collect::<Vec<_>>()), &set(&[])).is_empty());
         assert_eq!(new_volumes(&p, &set(&[1, 2, 3]), &set(&[4, 5])), (6..=14).collect::<Vec<_>>(), "queued volumes are not asked twice");
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn whole_run_releases_count_as_volume_zero() {
-        let p = parse("UploaderA", "Queen's Quality (2017-2026) (Digital) (UploaderA)");
+        let p = parse("Zenith", "Empress Quality (2017-2026) (Digital) (Zenith)");
         assert_eq!(volumes_of(&p), vec![0]);
         assert_eq!(new_volumes(&p, &set(&[]), &set(&[])), vec![0]);
         assert!(new_volumes(&p, &set(&[0]), &set(&[])).is_empty());
@@ -99,52 +99,52 @@ mod tests {
 
     #[test]
     fn links_match_whole_words_and_honour_the_exclude_regex() {
-        let p = parse("UploaderA", "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)");
-        assert!(matches_link(&p, "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)", "prince freya", ""));
-        assert!(!matches_link(&p, "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)", "freya prince", ""));
-        assert!(!matches_link(&p, "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)", "prince freya", "(?i)digital"));
-        assert!(!matches_link(&p, "x", "prince freya", "("), "a broken exclude regex excludes instead of matching everything");
+        let p = parse("Zenith", "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)");
+        assert!(matches_link(&p, "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)", "duke fenrir", ""));
+        assert!(!matches_link(&p, "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)", "fenrir duke", ""));
+        assert!(!matches_link(&p, "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)", "duke fenrir", "(?i)digital"));
+        assert!(!matches_link(&p, "x", "duke fenrir", "("), "a broken exclude regex excludes instead of matching everything");
     }
 
     #[test]
     fn titleless_file_names_inherit_the_torrents_match() {
-        // The colored Steel Ball Run torrent: no series title in any file name.
+        // The colored Iron Orb Race torrent: no series title in any file name.
         let t = TorrentInfo {
-            name: "Jojo Part 7-) Steel Ball Run".into(),
-            files: ["Volume 01 - September 5th, 1890 San Diego Beach.cbz", "Volume 02 - First Stage, 15,000 Meters.cbz", "Volume 27f.cbz", "Altercolor. Vol26-Ch105.cbz", "readme.txt"]
+            name: "Wild Quest Part 7 - Iron Orb Race".into(),
+            files: ["Volume 01 - June 5th, 1850 Harbor Town.cbz", "Volume 02 - First Stage, 15,000 Meters.cbz", "Volume 27f.cbz", "Altershade. Vol26-Ch105.cbz", "readme.txt"]
                 .iter()
                 .map(|p| TorrentFile { path: (*p).into(), size: 100 })
                 .collect(),
         };
-        let sel = select_files(&rules(), "drgn", "steel ball run", "", &t, &set(&[1]), &set(&[]));
+        let sel = select_files(&rules(), "dragonet", "iron orb race", "", &t, &set(&[1]), &set(&[]));
         assert_eq!(sel.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1, 2, 3], "volume 1 is owned, readme is not an archive");
     }
 
     #[test]
     fn variants_of_one_release_collapse_to_the_preferred_one() {
         let (a, b, c) = (
-            parse("UploaderF", "Mitama Security - Spirit Busters (2021) (Digital) (UploaderF-repack)"),
-            parse("UploaderF", "Mitama Security - Spirit Busters (2021) (Digital) (UploaderF-Empire)"),
-            parse("UploaderF", "Another Series v01 (2021) (Digital) (UploaderF-repack)"),
+            parse("tanuki", "Hollow Guard - Ghost Hunters (2021) (Digital) (tanuki-repack)"),
+            parse("tanuki", "Hollow Guard - Ghost Hunters (2021) (Digital) (tanuki-Crown)"),
+            parse("tanuki", "Another Series v01 (2021) (Digital) (tanuki-repack)"),
         );
-        let keep = pick_variants(&rules(), "UploaderF", &[(0, &a), (1, &b), (2, &c)]);
-        assert_eq!(keep, [1usize, 2].into_iter().collect::<HashSet<_>>(), "Empire wins; the other series is unaffected");
+        let keep = pick_variants(&rules(), "tanuki", &[(0, &a), (1, &b), (2, &c)]);
+        assert_eq!(keep, [1usize, 2].into_iter().collect::<HashSet<_>>(), "Crown wins; the other series is unaffected");
     }
 
     #[test]
     fn only_new_archives_of_the_series_are_selected_from_a_torrent() {
         let file = |p: &str| TorrentFile { path: p.into(), size: 100 };
         let t = TorrentInfo {
-            name: "Teppeki Honeymoon".into(),
+            name: "Ironclad Honeymoon".into(),
             files: vec![
-                file("Teppeki Honeymoon v01 (2025) (Digital) (UploaderE).cbz"),
-                file("Teppeki Honeymoon v02 (2026) (Digital) (UploaderE).cbz"),
-                file("Teppeki Honeymoon v03 (2026) (Digital) (UploaderE).epub"),
+                file("Ironclad Honeymoon v01 (2025) (Digital) (PixelScans).cbz"),
+                file("Ironclad Honeymoon v02 (2026) (Digital) (PixelScans).cbz"),
+                file("Ironclad Honeymoon v03 (2026) (Digital) (PixelScans).epub"),
                 file("cover.jpg"),
-                file("Another Series v01 (2026) (Digital) (UploaderE).cbz"),
+                file("Another Series v01 (2026) (Digital) (PixelScans).cbz"),
             ],
         };
-        let sel = select_files(&rules(), "UploaderE", "teppeki honeymoon", "", &t, &set(&[1]), &set(&[]));
+        let sel = select_files(&rules(), "PixelScans", "ironclad honeymoon", "", &t, &set(&[1]), &set(&[]));
         assert_eq!(sel, vec![(1, vec![2])], "v01 is owned, the epub and jpg are not archives, the other series is not followed");
     }
 }

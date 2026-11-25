@@ -110,21 +110,6 @@ impl Db {
 
     // ---- uploaders -----------------------------------------------------------------
 
-    /// Seeds the default uploaders once; later removals are respected.
-    pub fn nyaa_seed_uploaders(&self, defaults: &[&str]) {
-        let defaults: Vec<String> = defaults.iter().map(|s| s.to_string()).collect();
-        self.exec(move |c| {
-            let seeded: Option<String> = c.query_row("SELECT value FROM settings WHERE key = 'nyaa_seeded'", [], |r| r.get(0)).optional().ok().flatten();
-            if seeded.is_some() {
-                return;
-            }
-            for name in defaults {
-                let _ = c.execute("INSERT OR IGNORE INTO nyaa_uploaders (name) VALUES (?1)", [name]);
-            }
-            let _ = c.execute("INSERT INTO settings (key, value) VALUES ('nyaa_seeded', '1')", []);
-        });
-    }
-
     pub fn nyaa_uploaders(&self) -> Vec<Uploader> {
         self.call(|c| {
             let Ok(mut st) = c.prepare("SELECT name, enabled, last_checked FROM nyaa_uploaders ORDER BY name COLLATE NOCASE") else { return Vec::new() };

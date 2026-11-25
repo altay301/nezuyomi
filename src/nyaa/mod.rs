@@ -11,18 +11,17 @@ pub mod store;
 pub mod sync;
 pub mod torrent;
 
-/// Uploaders followed out of the box (editable in Settings later).
-pub const DEFAULT_UPLOADERS: [&str; 6] = ["UploaderA", "UploaderB", "UploaderC", "UploaderD", "UploaderE", "UploaderF"];
 /// Literature - English-translated.
 pub const DEFAULT_CATEGORY: &str = "3_1";
 
-/// `nezuyomi --nyaa-probe [category]`: fetches the followed uploaders' feeds and reports how
+/// `nezuyomi --nyaa-probe <category> <uploader>...`: fetches the given uploaders' feeds and reports how
 /// the rules classify every item (no database, no qBittorrent, no downloads).
 pub fn probe(args: &[String]) -> i32 {
     let category = args.first().map_or(DEFAULT_CATEGORY, String::as_str);
+    let uploaders = args.get(1..).unwrap_or_default();
     let rules = rules::Rules::load();
     let mut total_unparsed = 0;
-    for uploader in DEFAULT_UPLOADERS {
+    for uploader in uploaders.iter().map(String::as_str) {
         let items = match feed::fetch(&feed::feed_url(uploader, category, None), None) {
             Ok(feed::Fetched::Items(i)) => i,
             Ok(feed::Fetched::NotModified) => Vec::new(),

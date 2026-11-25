@@ -25,7 +25,6 @@ use crate::{paths, stats};
 
 pub const APP_ID: &str = "io.github.altay301.Nezuyomi";
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
-const BUNDLED_EXTENSIONS: [&str; 2] = [include_str!("../extensions/ExampleSite.js"), include_str!("../extensions/anime.example")];
 
 pub fn run() -> glib::ExitCode {
     // MANGA_NON_UNIQUE=1 lets a test run start next to a running instance instead of
@@ -50,7 +49,7 @@ pub fn background<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, 
     });
 }
 
-/// Local folders, bundled extensions and user extensions (which override bundled ones by id).
+/// Local folders plus the extensions the user installed in the extensions folder.
 fn load_sources(db: Arc<Db>) -> Vec<Arc<dyn Source>> {
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from).unwrap_or_else(paths::manga_root);
     // "Nyaa" (downloaded volumes) is its own source and tab; it is not a series of "Local".
@@ -61,7 +60,7 @@ fn load_sources(db: Arc<Db>) -> Vec<Arc<dyn Source>> {
         Arc::new(LocalSource::new("local", "Local", root, &hidden_refs)),
         Arc::new(LocalSource::new("nyaa", "Nyaa", nyaa_root, &[])),
     ];
-    let mut codes: Vec<String> = BUNDLED_EXTENSIONS.iter().map(|s| s.to_string()).collect();
+    let mut codes: Vec<String> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(paths::extensions_dir()) {
         let mut files: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "js")).collect();
         files.sort();
@@ -513,7 +512,6 @@ impl App {
         let source_id = _source.id().to_string();
         background(
             move || {
-                db.nyaa_seed_uploaders(&crate::nyaa::DEFAULT_UPLOADERS);
                 db.nyaa_uploaders().into_iter().filter(|u| u.enabled).map(|u| u.name).collect::<Vec<_>>()
             },
             move |uploaders| {

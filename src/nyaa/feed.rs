@@ -182,7 +182,7 @@ mod tests {
         let items = parse_rss(FIXTURE).unwrap();
         assert_eq!(items.len(), 3);
         let first = &items[0];
-        assert!(first.title.contains("UploaderF"), "{}", first.title);
+        assert!(first.title.contains("tanuki"), "{}", first.title);
         assert!(first.link.starts_with("https://nyaa.si/download/") && first.link.ends_with(".torrent"));
         assert_eq!(first.info_hash.len(), 40);
         assert_eq!(first.category_id, "3_1");
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn urls_are_built_and_encoded() {
-        assert_eq!(feed_url("UploaderA", "3_1", None), "https://nyaa.si/?page=rss&u=UploaderA&c=3_1");
+        assert_eq!(feed_url("Zenith", "3_1", None), "https://nyaa.si/?page=rss&u=Zenith&c=3_1");
         assert_eq!(feed_url("a b", "3_0", Some("Hero & Sage")), "https://nyaa.si/?page=rss&u=a%20b&c=3_0&q=Hero%20%26%20Sage");
         assert!(!feed_url("x", "3_1", Some("  ")).contains("&q="));
     }
@@ -208,10 +208,10 @@ mod tests {
 
     #[test]
     fn entities_in_titles_survive() {
-        let xml = r#"<rss xmlns:nyaa="x"><channel><item><title>Loner Life v01-14 [Seven Seas Siren] [Stick &amp; Oak] &#8211; it&apos;s</title>
+        let xml = r#"<rss xmlns:nyaa="x"><channel><item><title>Hermit Life v01-14 [Nine Seas Siren] [Stick &amp; Maple] &#8211; it&apos;s</title>
             <link>https://nyaa.si/download/1.torrent</link><nyaa:infoHash>ABCDEF0123456789ABCDEF0123456789ABCDEF01</nyaa:infoHash></item></channel></rss>"#;
         let items = parse_rss(xml).unwrap();
-        assert_eq!(items[0].title, "Loner Life v01-14 [Seven Seas Siren] [Stick & Oak] \u{2013} it's");
+        assert_eq!(items[0].title, "Hermit Life v01-14 [Nine Seas Siren] [Stick & Maple] \u{2013} it's");
         assert_eq!(items[0].info_hash, "abcdef0123456789abcdef0123456789abcdef01");
     }
 

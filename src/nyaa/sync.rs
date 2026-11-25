@@ -384,7 +384,6 @@ pub fn poll_downloads(ctx: &Ctx, report: &mut Report) {
 /// `force` ignores `If-Modified-Since`.
 pub fn run_cycle(ctx: &Ctx, force: bool) -> Report {
     let mut report = Report::default();
-    ctx.db.nyaa_seed_uploaders(&super::DEFAULT_UPLOADERS);
     for (n, up) in ctx.db.nyaa_uploaders().into_iter().filter(|u| u.enabled).enumerate() {
         if n > 0 {
             std::thread::sleep(std::time::Duration::from_millis(if cfg!(test) { 0 } else { 2000 })); // be polite to Nyaa
@@ -543,14 +542,14 @@ mod tests {
     }
 
     const FILES: [(&str, usize); 3] = [
-        ("IsoSeries v01 (2026) (Digital) (UploaderA).cbz", 1000),
-        ("IsoSeries v02 (2026) (Digital) (UploaderA).cbz", 1000),
-        ("IsoSeries v03 (2026) (Digital) (UploaderA).epub", 1000),
+        ("IsoSeries v01 (2026) (Digital) (Zenith).cbz", 1000),
+        ("IsoSeries v02 (2026) (Digital) (Zenith).cbz", 1000),
+        ("IsoSeries v03 (2026) (Digital) (Zenith).epub", 1000),
     ];
 
     #[test]
     fn folder_names_are_safe() {
-        assert_eq!(sanitize_folder("Re:Zero / Season 2?"), "Re Zero Season 2");
+        assert_eq!(sanitize_folder("Re:Nine / Season 2?"), "Re Nine Season 2");
         assert_eq!(sanitize_folder("../../etc"), "etc");
         assert_eq!(sanitize_folder("  ...  "), "Untitled");
         assert!(sanitize_folder(&"x".repeat(500)).len() <= 120);
@@ -563,13 +562,16 @@ mod tests {
         let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();
         let st = settings(&dir.join("Nyaa"), 1); // nothing listens on port 1
         let fake = Fake::default();
-        fake.publish("UploaderA", "IsoSeries v01-02 (2026) (Digital) (UploaderA)", make_torrent("IsoSeries", &FILES[..2]), 2000);
-        fake.publish("UploaderA", "Unrelated Series v01 (2026) (Digital) (UploaderA)", make_torrent("Unrelated", &[("Unrelated Series v01 (2026) (Digital) (UploaderA).cbz", 10)]), 10);
-        fake.publish("UploaderC", "Some Book v01 [Audiobook] [UpC]", make_torrent("Book", &[("book.m4b", 10)]), 10);
+        fake.publish("Zenith", "IsoSeries v01-02 (2026) (Digital) (Zenith)", make_torrent("IsoSeries", &FILES[..2]), 2000);
+        fake.publish("Zenith", "Unrelated Series v01 (2026) (Digital) (Zenith)", make_torrent("Unrelated", &[("Unrelated Series v01 (2026) (Digital) (Zenith).cbz", 10)]), 10);
+        fake.publish("Mapleton", "Some Book v01 [Audiobook] [Maple]", make_torrent("Book", &[("book.m4b", 10)]), 10);
         let qb = Client::new(1, None, None);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
 
-        link_series(&ctx, "ExampleSite", "42", "IsoSeries", "UploaderA", "isoseries", true, Edition::Standard).unwrap();
+        link_series(&ctx, "examplesite", "42", "IsoSeries", "Zenith", "isoseries", true, Edition::Standard).unwrap();
         let report = run_cycle(&ctx, true);
         // (the match itself already happened while linking, so the cycle reports 0 new matches)
         assert_eq!(report.queued, 0);
@@ -583,7 +585,7 @@ mod tests {
         // A second cycle is idempotent and conditional: it sends If-Modified-Since now.
         let again = run_cycle(&ctx, false);
         assert_eq!(again.new_releases, 0);
-        assert!(fake.since_seen.lock().unwrap().iter().any(|(u, s)| u == "UploaderA" && s.is_some()));
+        assert!(fake.since_seen.lock().unwrap().iter().any(|(u, s)| u == "Zenith" && s.is_some()));
         assert_eq!(db.nyaa_releases_in_states(&[store::MATCHED]).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -595,15 +597,18 @@ mod tests {
         let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();
         let st = settings(&dir.join("Nyaa"), 1);
         let fake = Fake::default();
-        fake.publish("UploaderA", "IsoSeries v01-02 (2026) (Digital) (UploaderA)", make_torrent("IsoSeries", &FILES[..2]), 2000);
+        fake.publish("Zenith", "IsoSeries v01-02 (2026) (Digital) (Zenith)", make_torrent("IsoSeries", &FILES[..2]), 2000);
         let qb = Client::new(1, None, None);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
         let folder = st.root.join("IsoSeries");
         std::fs::create_dir_all(&folder).unwrap();
         for (name, _) in &FILES[..2] {
             std::fs::write(folder.join(name), b"x").unwrap();
         }
-        link_series(&ctx, "ExampleSite", "42", "IsoSeries", "UploaderA", "isoseries", true, Edition::Standard).unwrap();
+        link_series(&ctx, "examplesite", "42", "IsoSeries", "Zenith", "isoseries", true, Edition::Standard).unwrap();
         let report = run_cycle(&ctx, true);
         assert_eq!(report.matched, 0, "both volumes are already on disk: {report:?}");
         assert_eq!(db.nyaa_releases_in_states(&[store::SKIPPED]).len(), 1);
@@ -618,13 +623,16 @@ mod tests {
         let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();
         let st = settings(&dir.join("Nyaa"), 1);
         let fake = Fake::default();
-        let hash = fake.publish("UploaderA", "IsoSeries v01-02 (2026) (Digital) (UploaderA)", make_torrent("IsoSeries", &FILES[..2]), 2000);
+        let hash = fake.publish("Zenith", "IsoSeries v01-02 (2026) (Digital) (Zenith)", make_torrent("IsoSeries", &FILES[..2]), 2000);
         // The server hands out a different torrent than the feed announced.
         let link = format!("https://nyaa.si/download/{hash}.torrent");
-        fake.torrents.lock().unwrap().insert(link, make_torrent("Other", &[("IsoSeries v09 (2026) (Digital) (UploaderA).cbz", 5)]));
+        fake.torrents.lock().unwrap().insert(link, make_torrent("Other", &[("IsoSeries v09 (2026) (Digital) (Zenith).cbz", 5)]));
         let qb = Client::new(1, None, None);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
-        link_series(&ctx, "ExampleSite", "42", "IsoSeries", "UploaderA", "isoseries", true, Edition::Standard).unwrap();
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
+        link_series(&ctx, "examplesite", "42", "IsoSeries", "Zenith", "isoseries", true, Edition::Standard).unwrap();
         run_cycle(&ctx, true);
         let err = queue_release(&ctx, &hash, false).unwrap_err();
         assert!(err.contains("differs"), "{err}");
@@ -638,19 +646,22 @@ mod tests {
         let rules = Rules::from_toml(include_str!("rules.toml"), None).unwrap();
         let st = settings(&dir.join("Nyaa"), 1);
         let fake = Fake::default();
-        fake.publish("UploaderB", "Boruto - Two Blue Vortex v06 (2026) (Digital) (UploaderB)", make_torrent("Boruto", &[("Boruto - Two Blue Vortex v06 (2026) (Digital) (UploaderB).cbz", 10)]), 10);
+        fake.publish("Brightfox", "Kenji - Twin Red Storm v06 (2026) (Digital) (Brightfox)", make_torrent("Kenji", &[("Kenji - Twin Red Storm v06 (2026) (Digital) (Brightfox).cbz", 10)]), 10);
         let qb = Client::new(1, None, None);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
-        db.nyaa_seed_uploaders(&super::super::DEFAULT_UPLOADERS);
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
+        db.nyaa_add_uploader("Brightfox");
         assert!(search_feeds(&ctx, "  ").is_err());
-        assert_eq!(search_feeds(&ctx, "boruto").unwrap(), 1);
-        assert_eq!(search_feeds(&ctx, "boruto").unwrap(), 0, "the same results are not new twice");
+        assert_eq!(search_feeds(&ctx, "kenji").unwrap(), 1);
+        assert_eq!(search_feeds(&ctx, "kenji").unwrap(), 0, "the same results are not new twice");
         assert_eq!(db.nyaa_recent_releases(10).len(), 1);
         for u in db.nyaa_uploaders() {
             db.nyaa_set_uploader_enabled(&u.name, false);
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-        assert!(search_feeds(&ctx, "boruto").is_err(), "nothing enabled is explained, not silent");
+        assert!(search_feeds(&ctx, "kenji").is_err(), "nothing enabled is explained, not silent");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -664,24 +675,27 @@ mod tests {
         let st = settings(&dir.join("Nyaa"), 1);
         let fake = Fake::default();
         let std_hash = fake.publish(
-            "UploaderB",
-            "Steel Ball Run v01-02 (2026) (Omnibus Edition) (Digital) (UploaderB)",
-            make_torrent("Steel Ball Run", &[("Steel Ball Run v01 (2026) (Omnibus Edition) (Digital) (UploaderB).cbz", 100), ("Steel Ball Run v02 (2026) (Omnibus Edition) (Digital) (UploaderB).cbz", 100)]),
+            "Brightfox",
+            "Iron Orb Race v01-02 (2026) (Omnibus Edition) (Digital) (Brightfox)",
+            make_torrent("Iron Orb Race", &[("Iron Orb Race v01 (2026) (Omnibus Edition) (Digital) (Brightfox).cbz", 100), ("Iron Orb Race v02 (2026) (Omnibus Edition) (Digital) (Brightfox).cbz", 100)]),
             200,
         );
         let col_hash = fake.publish(
-            "drgn",
-            "JoJo's Bizarre Adventure Part 7-) Steel Ball Run Colored (Single Pages)",
-            make_torrent("Jojo Part 7-) Steel Ball Run", &[("Volume 01 - September 5th, 1890 San Diego Beach.cbz", 100), ("Volume 02 - First Stage, 15,000 Meters.cbz", 100), ("Volume 27f.cbz", 100)]),
+            "dragonet",
+            "Wild Quest Adventure Part 7 - Iron Orb Race Colored (Single Pages)",
+            make_torrent("Wild Quest Part 7 - Iron Orb Race", &[("Volume 01 - June 5th, 1850 Harbor Town.cbz", 100), ("Volume 02 - First Stage, 15,000 Meters.cbz", 100), ("Volume 27f.cbz", 100)]),
             300,
         );
-        db.nyaa_add_uploader("drgn");
+        db.nyaa_add_uploader("dragonet");
         let qb = Client::new(1, None, None);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
-        let plain = link_series(&ctx, "ExampleSite", "sbr", "Steel Ball Run", "UploaderB", "steel ball run", true, Edition::Standard).unwrap();
-        let colored = link_series(&ctx, "ExampleSite", "sbr", "Steel Ball Run", "drgn", "steel ball run", true, Edition::Colored).unwrap();
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
+        let plain = link_series(&ctx, "examplesite", "sbr", "Iron Orb Race", "Brightfox", "iron orb race", true, Edition::Standard).unwrap();
+        let colored = link_series(&ctx, "examplesite", "sbr", "Iron Orb Race", "dragonet", "iron orb race", true, Edition::Colored).unwrap();
         assert_ne!(plain.id, colored.id, "one series, two links");
-        assert!(colored.folder.ends_with("Steel Ball Run (Colored)") && plain.folder.ends_with("Steel Ball Run"), "{} / {}", plain.folder, colored.folder);
+        assert!(colored.folder.ends_with("Iron Orb Race (Colored)") && plain.folder.ends_with("Iron Orb Race"), "{} / {}", plain.folder, colored.folder);
         run_cycle(&ctx, true);
 
         let std_rel = db.nyaa_release(&std_hash).unwrap();
@@ -693,7 +707,7 @@ mod tests {
         // The torrent's own files are what decides: titleless "Volume NN" names are all wanted.
         let bytes = fake.torrent(&col_rel.link).unwrap();
         let info = torrent::read(&bytes).unwrap();
-        let sel = matcher::select_files(&rules, "drgn", &colored.query, "", &info, &db.nyaa_owned_volumes(colored.id), &Default::default());
+        let sel = matcher::select_files(&rules, "dragonet", &colored.query, "", &info, &db.nyaa_owned_volumes(colored.id), &Default::default());
         assert_eq!(sel.len(), 3);
         // Having the plain volumes does not make the colored ones "owned".
         db.nyaa_add_volume(plain.id, 1, "/x/v01.cbz", "");
@@ -711,11 +725,11 @@ mod tests {
             let c = rusqlite::Connection::open(&path).unwrap();
             c.execute_batch(
                 "CREATE TABLE nyaa_links (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, manga_id TEXT NOT NULL, title TEXT NOT NULL, uploader TEXT NOT NULL, query TEXT NOT NULL, auto INTEGER NOT NULL DEFAULT 1, exclude TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL, UNIQUE (source, manga_id));
-                 INSERT INTO nyaa_links (source, manga_id, title, uploader, query, folder) VALUES ('ExampleSite', '1', 'Old Series', 'UploaderA', 'old series', '/x/Old Series');
+                 INSERT INTO nyaa_links (source, manga_id, title, uploader, query, folder) VALUES ('examplesite', '1', 'Old Series', 'Zenith', 'old series', '/x/Old Series');
                  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                  CREATE TABLE nyaa_releases (info_hash TEXT PRIMARY KEY, uploader TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, pub_date TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', state TEXT NOT NULL, link_id INTEGER, volumes TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', first_seen INTEGER NOT NULL);
-                 INSERT INTO nyaa_releases (info_hash, uploader, title, state, link_id, note, first_seen) VALUES ('aa', 'drgn', 'Colored one', 'skipped', 1, 'nothing new in this torrent', 1);
-                 INSERT INTO nyaa_releases (info_hash, uploader, title, state, link_id, note, first_seen) VALUES ('bb', 'UploaderA', 'Not manga', 'skipped', NULL, 'not an archive', 1);",
+                 INSERT INTO nyaa_releases (info_hash, uploader, title, state, link_id, note, first_seen) VALUES ('aa', 'dragonet', 'Colored one', 'skipped', 1, 'nothing new in this torrent', 1);
+                 INSERT INTO nyaa_releases (info_hash, uploader, title, state, link_id, note, first_seen) VALUES ('bb', 'Zenith', 'Not manga', 'skipped', NULL, 'not an archive', 1);",
             )
             .unwrap();
         }
@@ -726,7 +740,7 @@ mod tests {
         assert_eq!((a.state.as_str(), a.link_id), (store::SEEN, None), "looked at again under the new rules");
         assert_eq!(db.nyaa_release("bb").unwrap().state, store::SKIPPED, "genuinely not manga stays skipped");
         // The same series can now be linked a second time as the colored edition.
-        let id = db.nyaa_add_link(Link { id: 0, source: "ExampleSite".into(), manga_id: "1".into(), title: "Old Series".into(), uploader: "UploaderA".into(), query: "old series".into(), auto: true, exclude: String::new(), folder: "/x/Old Series (Colored)".into(), edition: "colored".into() });
+        let id = db.nyaa_add_link(Link { id: 0, source: "examplesite".into(), manga_id: "1".into(), title: "Old Series".into(), uploader: "Zenith".into(), query: "old series".into(), auto: true, exclude: String::new(), folder: "/x/Old Series (Colored)".into(), edition: "colored".into() });
         assert!(id.is_some());
         assert_eq!(db.nyaa_links().len(), 2);
         // Opening again does not repeat the one-time reset.
@@ -762,13 +776,16 @@ mod tests {
             qb.delete(&leftover.hash, false).unwrap();
         }
         let unique = format!("IsoSeries{}", std::process::id());
-        let file = |v: u32, ext: &str| format!("{unique} v{v:02} (2026) (Digital) (UploaderA).{ext}");
+        let file = |v: u32, ext: &str| format!("{unique} v{v:02} (2026) (Digital) (Zenith).{ext}");
         let files: Vec<(String, usize)> = vec![(file(1, "cbz"), 1000), (file(2, "cbz"), 1000), (file(3, "cbz"), 1000), (file(4, "epub"), 1000)];
         let file_refs: Vec<(&str, usize)> = files.iter().map(|(n, l)| (n.as_str(), *l)).collect();
         let torrent = make_torrent(&unique, &file_refs);
         let fake = Fake::default();
-        let hash = fake.publish("UploaderA", &format!("{unique} v01-04 (2026) (Digital) (UploaderA)"), torrent.clone(), 4000);
+        let hash = fake.publish("Zenith", &format!("{unique} v01-04 (2026) (Digital) (Zenith)"), torrent.clone(), 4000);
         let ctx = Ctx { db: &db, rules: &rules, settings: &st, fetcher: &fake, qbit: &qb };
+        for u in ["Zenith", "Mapleton", "Brightfox", "dragonet"] {
+            db.nyaa_add_uploader(u);
+        }
 
         // Volume 1 is already in the series folder (added by hand). The torrent's data sits in a
         // separate staging folder that qBittorrent is told to trust, so it completes without any
@@ -784,7 +801,7 @@ mod tests {
         qb.ensure_category(&st.root.to_string_lossy()).unwrap();
         qb.add(&torrent, &unique, &stage.to_string_lossy(), true).unwrap();
 
-        link_series(&ctx, "ExampleSite", "42", &unique, "UploaderA", &unique.to_lowercase(), true, Edition::Standard).unwrap();
+        link_series(&ctx, "examplesite", "42", &unique, "Zenith", &unique.to_lowercase(), true, Edition::Standard).unwrap();
         // volume 1 is owned (found by the folder scan): only 2 and 3 are wanted; the epub never
         let report = run_cycle(&ctx, true);
         assert_eq!(report.queued, 1, "{report:?}");
@@ -816,7 +833,7 @@ mod tests {
         assert_eq!(owned, [1u32, 2, 3].into_iter().collect(), "volume 4 is an epub and must not appear");
 
         // A later release that only adds nothing new is skipped.
-        let hash2 = fake.publish("UploaderA", &format!("{unique} v01-03 (2026) (Digital) (UploaderA)"), make_torrent(&format!("{unique}b"), &file_refs[..3]), 3000);
+        let hash2 = fake.publish("Zenith", &format!("{unique} v01-03 (2026) (Digital) (Zenith)"), make_torrent(&format!("{unique}b"), &file_refs[..3]), 3000);
         run_cycle(&ctx, true);
         assert_eq!(db.nyaa_release(&hash2).unwrap().state, store::SKIPPED);
 

@@ -209,7 +209,7 @@ impl BrowseView {
     // ---- modes ---------------------------------------------------------------
 
     pub fn show_library(self: &Rc<Self>, db: Arc<Db>) {
-        self.show_entries(move || db.library(), "Your library is empty. Open Browse and add a series.", "series in your library");
+        self.show_entries(move || db.library(), "Your library is empty. Add a series from a source.", "series in your library");
     }
 
     /// Series with at least one finished download (readable without a network).

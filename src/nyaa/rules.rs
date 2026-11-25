@@ -40,7 +40,7 @@ impl Edition {
 }
 
 /// "Colored", "(Colour)", "Full Color", "Digital Colored" as a word of its own. A hyphenated part of a
-/// title ("Seven-Colored Recollections") does not count.
+/// title ("Seven-Colored Memories") does not count.
 pub fn detect_edition(name: &str) -> Edition {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r"(?i)(?:^|[\s(\[])(?:colou?red|full[ -]?colou?r(?:ed)?|digital colou?r(?:ed)?)(?:[\s)\]]|$)|[(\[]\s*colou?r\s*[)\]]").unwrap());
@@ -241,7 +241,8 @@ mod tests {
     use super::*;
 
     fn rules() -> Rules {
-        Rules::from_toml(DEFAULT_RULES, None).unwrap()
+        // The shipped defaults name no uploader; variant preference comes from a user table.
+        Rules::from_toml(DEFAULT_RULES, Some("[uploader.tanuki]\nprefer_variant = [\"Crown\", \"repack\"]\n")).unwrap()
     }
 
     fn vols(r: &Parsed) -> Vec<u32> {
@@ -250,124 +251,124 @@ mod tests {
 
     #[test]
     fn volume_ranges() {
-        let r = rules().parse("UploaderA", "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)").unwrap();
-        assert_eq!((r.title.as_str(), vols(&r), r.kind), ("Prince Freya", (1..=13).collect::<Vec<_>>(), Kind::Volumes));
-        assert_eq!(r.variant, "UploaderA");
-        let r = rules().parse("UploaderD", "How to Handle My Sassy Big Sis v01 (2026) (Digital) (GroupH)").unwrap();
-        assert_eq!((r.title.as_str(), vols(&r)), ("How to Handle My Sassy Big Sis", vec![1]));
+        let r = rules().parse("Zenith", "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)").unwrap();
+        assert_eq!((r.title.as_str(), vols(&r), r.kind), ("Duke Fenrir", (1..=13).collect::<Vec<_>>(), Kind::Volumes));
+        assert_eq!(r.variant, "Zenith");
+        let r = rules().parse("bluelark", "How to Tame My Moody Sister v01 (2026) (Digital) (Lark)").unwrap();
+        assert_eq!((r.title.as_str(), vols(&r)), ("How to Tame My Moody Sister", vec![1]));
     }
 
     #[test]
     fn volumes_with_loose_chapters() {
-        let r = rules().parse("UploaderA", "Ultimate Exorcist Kiyoshi v01,009-090 (2024-2026) (Digital) (UploaderA)").unwrap();
+        let r = rules().parse("Zenith", "Grand Summoner Haruto v01,009-090 (2024-2026) (Digital) (Zenith)").unwrap();
         assert_eq!((vols(&r), r.chapters), (vec![1], Some((9, 90))));
-        let r = rules().parse("UploaderA", "Super Psychic Policeman Chojo v01-03,026-065 (2024-2026) (Digital) (UploaderA)").unwrap();
+        let r = rules().parse("Zenith", "Mega Psychic Officer Kojo v01-03,026-065 (2024-2026) (Digital) (Zenith)").unwrap();
         assert_eq!((vols(&r), r.chapters), (vec![1, 2, 3], Some((26, 65))));
     }
 
     #[test]
     fn whole_run_without_volume_number() {
-        let r = rules().parse("UploaderA", "Queen's Quality (2017-2026) (Digital) (UploaderA)").unwrap();
-        assert_eq!((r.title.as_str(), r.kind, vols(&r)), ("Queen's Quality", Kind::Run, vec![]));
+        let r = rules().parse("Zenith", "Empress Quality (2017-2026) (Digital) (Zenith)").unwrap();
+        assert_eq!((r.title.as_str(), r.kind, vols(&r)), ("Empress Quality", Kind::Run, vec![]));
     }
 
     #[test]
     fn compilation_releases() {
         let r = rules()
-            .parse("UploaderE", "The God-Slaying Demon King 001-021 as v01-05 (Digital-Compilation) (Square Enix) (UploaderE)")
+            .parse("PixelScans", "The Star-Slaying Dragon King 001-021 as v01-05 (Digital-Compilation) (Acme Comics) (PixelScans)")
             .unwrap();
-        assert_eq!((r.title.as_str(), r.kind, vols(&r), r.chapters), ("The God-Slaying Demon King", Kind::Compilation, (1..=5).collect::<Vec<_>>(), Some((1, 21))));
+        assert_eq!((r.title.as_str(), r.kind, vols(&r), r.chapters), ("The Star-Slaying Dragon King", Kind::Compilation, (1..=5).collect::<Vec<_>>(), Some((1, 21))));
     }
 
     #[test]
     fn bracket_style_and_several_groups() {
-        let r = rules().parse("UploaderC", "Reincarnated Onmyoji v01-02 [Hanashi Media] [UpC]").unwrap();
-        assert_eq!((r.title.as_str(), vols(&r), r.variant.as_str()), ("Reincarnated Onmyoji", vec![1, 2], "Oak"));
-        let r = rules().parse("UploaderD", "Unnamed Memory v01-08 (2022-2026) (Digital) (GroupG, GroupH)").unwrap();
-        assert_eq!((vols(&r).len(), r.variant.as_str()), (8, "GroupG, GroupH"));
+        let r = rules().parse("Mapleton", "Reborn Alchemist v01-02 [Hana Press] [Maple]").unwrap();
+        assert_eq!((r.title.as_str(), vols(&r), r.variant.as_str()), ("Reborn Alchemist", vec![1, 2], "Maple"));
+        let r = rules().parse("bluelark", "Nameless Echo v01-08 (2022-2026) (Digital) (Irontail, Lark)").unwrap();
+        assert_eq!((vols(&r).len(), r.variant.as_str()), (8, "Irontail, Lark"));
     }
 
     #[test]
     fn file_names_inside_torrents() {
-        let r = rules().parse("UploaderE", "Teppeki Honeymoon v02 (2026) (Digital) (UploaderE).cbz").unwrap();
-        assert_eq!((r.title.as_str(), vols(&r)), ("Teppeki Honeymoon", vec![2]));
+        let r = rules().parse("PixelScans", "Ironclad Honeymoon v02 (2026) (Digital) (PixelScans).cbz").unwrap();
+        assert_eq!((r.title.as_str(), vols(&r)), ("Ironclad Honeymoon", vec![2]));
         // a trailing "(F)" flag after the group is ignored for the variant
-        let r = rules().parse("UploaderD", "How to Handle My Sassy Big Sis v01 (2026) (Digital) (GroupH) (F).cbz").unwrap();
-        assert_eq!(r.variant, "GroupH");
+        let r = rules().parse("bluelark", "How to Tame My Moody Sister v01 (2026) (Digital) (Lark) (F).cbz").unwrap();
+        assert_eq!(r.variant, "Lark");
     }
 
     #[test]
     fn non_manga_is_skipped() {
         let r = rules();
-        assert_eq!(r.parse("UploaderC", "Loner Life in Another World v01-14 [Audiobook] [Seven Seas Siren] [Stick & Oak]"), Err(Skip::Rejected));
-        assert_eq!(r.parse("UploaderF", "The Otherworlder, Exploring the Dungeon v01 [Yen Press] [UploaderF-Empire].epub"), Err(Skip::Extension));
-        assert_eq!(r.parse("UploaderB", "Weekly Viz, ShonenJump and MangaPlus Chapter Updates - Week 47 2026 (Digital) (UploaderB)"), Err(Skip::Rejected));
+        assert_eq!(r.parse("Mapleton", "Hermit Life in Another Realm v01-14 [Audiobook] [Nine Seas Siren] [Stick & Maple]"), Err(Skip::Rejected));
+        assert_eq!(r.parse("tanuki", "The Wanderer, Exploring the Cave v01 [Foo Press] [tanuki-Crown].epub"), Err(Skip::Extension));
+        assert_eq!(r.parse("Brightfox", "Weekly Foo, Bar and Baz Chapter Updates - Week 47 2026 (Digital) (Brightfox)"), Err(Skip::Rejected));
     }
 
     #[test]
     fn jpeg_xl_and_mass_packs_are_rejected() {
         let r = rules();
-        assert_eq!(r.parse("UploaderC", "The Destitute Lady Wants to Marry the Cursed Count v01 [JPEG-XL] [UpC]"), Err(Skip::Rejected));
-        assert_eq!(r.parse("UploaderC", "Full Alpha Manga App Rip up to 2026-11-18 [Anon]"), Err(Skip::Rejected));
-        assert!(r.parse("UploaderC", "The Destitute Lady Wants to Marry the Cursed Count v01 [UpC]").is_ok());
+        assert_eq!(r.parse("Mapleton", "The Poor Heiress Wants to Marry the Haunted Baron v01 [JPEG-XL] [Maple]"), Err(Skip::Rejected));
+        assert_eq!(r.parse("Mapleton", "Full Beta Manga App Rip up to 2026-11-18 [Anon]"), Err(Skip::Rejected));
+        assert!(r.parse("Mapleton", "The Poor Heiress Wants to Marry the Haunted Baron v01 [Maple]").is_ok());
     }
 
     #[test]
     fn volume_style_file_names_without_a_series_title() {
         let r = rules();
-        let p = r.parse("drgn", "Volume 01 - September 5th, 1890 San Diego Beach.cbz").unwrap();
+        let p = r.parse("dragonet", "Volume 01 - June 5th, 1850 Harbor Town.cbz").unwrap();
         assert_eq!((p.title.as_str(), vols(&p)), ("", vec![1]));
-        assert_eq!(vols(&r.parse("drgn", "Volume 27f.cbz").unwrap()), vec![27]);
-        assert_eq!(vols(&r.parse("drgn", "Vol. 3.cbz").unwrap()), vec![3]);
-        assert_eq!(vols(&r.parse("drgn", "Altercolor. Vol26-Ch105.cbz").unwrap()), vec![26]);
+        assert_eq!(vols(&r.parse("dragonet", "Volume 27f.cbz").unwrap()), vec![27]);
+        assert_eq!(vols(&r.parse("dragonet", "Vol. 3.cbz").unwrap()), vec![3]);
+        assert_eq!(vols(&r.parse("dragonet", "Altershade. Vol26-Ch105.cbz").unwrap()), vec![26]);
         // Real series-style names still win and keep their title.
-        assert_eq!(r.parse("UploaderA", "Prince Freya v01 (2020) (Digital) (UploaderA).cbz").unwrap().title, "Prince Freya");
+        assert_eq!(r.parse("Zenith", "Duke Fenrir v01 (2020) (Digital) (Zenith).cbz").unwrap().title, "Duke Fenrir");
     }
 
     #[test]
     fn colored_editions_are_recognised_as_a_word() {
         let r = rules();
-        let c = r.parse("drgn", "JoJo's Bizarre Adventure Part 7-) Steel Ball Run Colored (Single Pages)").unwrap();
+        let c = r.parse("dragonet", "Wild Quest Adventure Part 7 - Iron Orb Race Colored (Single Pages)").unwrap();
         assert_eq!((c.edition, c.kind), (Edition::Colored, Kind::Run));
-        assert!(c.title.contains("Steel Ball Run"));
-        assert_eq!(r.parse("UploaderB", "Steel Ball Run v01-07 (2025-2026) (Omnibus Edition) (Digital) (UploaderB)").unwrap().edition, Edition::Standard);
-        assert_eq!(detect_edition("Dr. Stone v01 (Digital Colored) (Group)"), Edition::Colored);
-        assert_eq!(detect_edition("Dr. Stone v01 (Full Color) (Group)"), Edition::Colored);
-        assert_eq!(detect_edition("Series v01 [Colour] [UploaderA]"), Edition::Colored);
-        assert_eq!(detect_edition("The Seven Deadly Sins v02 - Seven-Colored Recollections [Vertical] [UploaderA]"), Edition::Standard, "a hyphenated word of the title");
+        assert!(c.title.contains("Iron Orb Race"));
+        assert_eq!(r.parse("Brightfox", "Iron Orb Race v01-07 (2025-2026) (Omnibus Edition) (Digital) (Brightfox)").unwrap().edition, Edition::Standard);
+        assert_eq!(detect_edition("Stone Doctor v01 (Digital Colored) (Group)"), Edition::Colored);
+        assert_eq!(detect_edition("Stone Doctor v01 (Full Color) (Group)"), Edition::Colored);
+        assert_eq!(detect_edition("Series v01 [Colour] [Zenith]"), Edition::Colored);
+        assert_eq!(detect_edition("The Seven Hidden Virtues v02 - Seven-Colored Memories [Vertex] [Zenith]"), Edition::Standard, "a hyphenated word of the title");
         assert_eq!(detect_edition("Watercolor Days v01"), Edition::Standard);
         assert_eq!(detect_edition("The Color of Happiness v01 (Digital) (Group)"), Edition::Standard, "a plain word 'Color' outside brackets");
     }
 
     #[test]
-    fn UploaderF_prefers_empire_then_repack() {
+    fn tanuki_prefers_crown_then_repack() {
         let r = rules();
-        let v = ["UploaderF-repack", "UploaderF-Empire+anadius"];
-        assert_eq!(r.preferred_variant("UploaderF", &v), 1);
-        assert_eq!(r.preferred_variant("UploaderF", &["UploaderF-repack"]), 0);
-        assert_eq!(r.preferred_variant("UploaderA", &v), 0, "uploaders without a preference keep the first");
+        let v = ["tanuki-repack", "tanuki-Crown+anavel"];
+        assert_eq!(r.preferred_variant("tanuki", &v), 1);
+        assert_eq!(r.preferred_variant("tanuki", &["tanuki-repack"]), 0);
+        assert_eq!(r.preferred_variant("Zenith", &v), 0, "uploaders without a preference keep the first");
     }
 
     #[test]
     fn user_rules_override_one_uploader_only() {
-        let user = "[uploader.UploaderF]\nprefer_variant = [\"repack\"]\n";
+        let user = "[uploader.tanuki]\nprefer_variant = [\"repack\"]\n";
         let r = Rules::from_toml(DEFAULT_RULES, Some(user)).unwrap();
-        assert_eq!(r.preferred_variant("UploaderF", &["UploaderF-repack", "UploaderF-Empire"]), 0);
-        assert!(r.parse("UploaderA", "Prince Freya v01-13 (2020-2026) (Digital) (UploaderA)").is_ok());
+        assert_eq!(r.preferred_variant("tanuki", &["tanuki-repack", "tanuki-Crown"]), 0);
+        assert!(r.parse("Zenith", "Duke Fenrir v01-13 (2020-2026) (Digital) (Zenith)").is_ok());
         assert!(Rules::from_toml(DEFAULT_RULES, Some("[default]\npatterns = ['(']\n")).is_err());
     }
 
     #[test]
     fn linking_phrase_matches_whole_words_ignoring_case_and_punctuation() {
-        assert!(title_matches("Prince Freya v01-13 (2020-2026)", "prince freya"));
-        assert!(title_matches("The Hero and the Sage, Reincarnated and Engaged 001-039", "hero & the sage"));
-        assert!(title_matches("Magu-chan - God of Destruction v01", "Magu chan"));
-        assert!(!title_matches("Princess Freyaa v01", "prince freya"));
+        assert!(title_matches("Duke Fenrir v01-13 (2020-2026)", "duke fenrir"));
+        assert!(title_matches("The Knight and the Mage, Reborn and Betrothed 001-039", "knight & the mage"));
+        assert!(title_matches("Mogu-kun - God of Creation v01", "Mogu kun"));
+        assert!(!title_matches("Duke Fenrirr v01", "duke fenrir"));
         assert!(!title_matches("Anything", ""));
     }
 
     #[test]
     fn absurd_volume_numbers_are_not_expanded() {
-        assert!(rules().parse("UploaderA", "Typo v1-99999 (2020) (Digital) (UploaderA)").is_err() || rules().parse("UploaderA", "Typo v1-99999 (2020) (Digital) (UploaderA)").unwrap().volumes.len() < 2001);
+        assert!(rules().parse("Zenith", "Typo v1-99999 (2020) (Digital) (Zenith)").is_err() || rules().parse("Zenith", "Typo v1-99999 (2020) (Digital) (Zenith)").unwrap().volumes.len() < 2001);
     }
 }

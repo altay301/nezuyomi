@@ -27,4 +27,4 @@ Full plan and technology choices: @PLAN.md
 
 ## Current phase
 
-Phases 0, 1, 2 (downloads, plus Nyaa torrent downloads through the owner's qBittorrent) and 4 (anime) are implemented; SiteB is blocked and Phase 3 (Suwayomi) is skipped on purpose: see PLAN.md → *Scope decisions*.
+Phases 0, 1, 2 (downloads, plus Nyaa torrent downloads through the owner's qBittorrent) and 4 (anime) are implemented; Phase 3 (Suwayomi) is skipped on purpose: see PLAN.md → *Scope decisions*.

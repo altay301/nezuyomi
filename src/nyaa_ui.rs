@@ -16,7 +16,7 @@ use crate::nyaa::service::Service;
 use crate::nyaa::store::{self, Link, Release};
 use crate::nyaa::sync::{Report, Settings};
 use crate::nyaa::rules::normalize;
-use crate::nyaa::{qbit, secret, DEFAULT_UPLOADERS};
+use crate::nyaa::{qbit, secret};
 use crate::source::Source;
 
 fn human(bytes: i64) -> String {
@@ -489,7 +489,6 @@ impl NyaaPage {
         let (db, this) = (self.db.clone(), self.clone());
         background(
             move || {
-                db.nyaa_seed_uploaders(&DEFAULT_UPLOADERS);
                 db.nyaa_uploaders()
             },
             move |ups| {
