@@ -31,3 +31,13 @@ Install the desktop entry and icons:
 ```sh
 ./tools/install-desktop.sh
 ```
+
+## Sources
+
+Nezuyomi ships no content sources. It reads local folders and comic archives (`~/Manga/`),
+and loads JavaScript source extensions placed in `~/.local/share/nezuyomi/extensions/`.
+You are responsible for the sources you add and for respecting the rights of content owners.
+
+## License
+
+[GPL-3.0-or-later](LICENSE)
